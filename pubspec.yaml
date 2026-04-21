@@ -1,0 +1,29 @@
+name: secure_chat_server
+description: "SecureChat Backend Server - A production-ready Dart server with WebSocket support"
+version: 1.0.0
+publish_to: none
+
+environment:
+  sdk: '^3.0.0'
+
+dependencies:
+  shelf: ^1.4.1
+  shelf_router: ^1.1.4
+  shelf_web_socket: ^1.0.4
+  mongo_dart: ^0.10.3
+  json_annotation: ^4.8.1
+  json_serializable: ^6.7.1
+  build_runner: ^2.4.7
+  web_socket_channel: ^2.4.0
+  dart_jsonwebtoken: ^2.8.0
+  crypto: ^3.0.3
+  uuid: ^4.2.2
+  http: ^1.1.0
+  mime: ^1.0.5
+  path: ^1.8.3
+  pointycastle: ^3.7.3
+  intl: ^0.18.1
+  yaml: ^3.1.2
+
+dev_dependencies:
+  lints: ^3.0.0
