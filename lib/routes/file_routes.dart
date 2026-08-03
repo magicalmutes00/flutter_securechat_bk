@@ -3,10 +3,20 @@ import 'dart:convert';
 import 'package:shelf/shelf.dart';
 import 'package:shelf_router/shelf_router.dart';
 import 'package:mime/mime.dart';
+import 'package:mongo_dart/mongo_dart.dart';
 import '../services/file_service.dart';
+import '../services/group_service.dart';
+import '../services/message_service.dart';
+import '../services/status_service.dart';
+import '../config/app_config.dart';
 
 class FileRoutes {
   final FileService _fileService = FileService();
+  final MessageService _messageService = MessageService();
+  final GroupService _groupService = GroupService();
+  final StatusService _statusService = StatusService();
+
+  int get maxFileSizeBytes => AppConfig.maxFileSizeBytes;
 
   Router get router => Router()
     ..post('/upload/image', _uploadImage)
@@ -43,8 +53,10 @@ class FileRoutes {
 
       final contentType = request.headers['content-type'] ?? '';
       if (!contentType.contains('multipart/form-data')) {
-        return Response(400,
-          body: jsonEncode({'error': 'Invalid content type. Expected multipart/form-data'}),
+        return Response(
+          400,
+          body: jsonEncode(
+              {'error': 'Invalid content type. Expected multipart/form-data'}),
           headers: {'Content-Type': 'application/json'},
         );
       }
@@ -53,8 +65,17 @@ class FileRoutes {
       final bytes = await reader.expand((e) => e).toList();
 
       if (bytes.isEmpty) {
-        return Response(400,
+        return Response(
+          400,
           body: jsonEncode({'error': 'No file provided'}),
+          headers: {'Content-Type': 'application/json'},
+        );
+      }
+
+      if (bytes.length > maxFileSizeBytes) {
+        return Response(
+          413,
+          body: jsonEncode({'error': 'File size exceeds maximum allowed size'}),
           headers: {'Content-Type': 'application/json'},
         );
       }
@@ -72,7 +93,8 @@ class FileRoutes {
       await tempDir.delete();
 
       if (result['success'] != true) {
-        return Response(400,
+        return Response(
+          400,
           body: jsonEncode(result),
           headers: {'Content-Type': 'application/json'},
         );
@@ -83,7 +105,8 @@ class FileRoutes {
         headers: {'Content-Type': 'application/json'},
       );
     } catch (e) {
-      return Response(500,
+      return Response(
+        500,
         body: jsonEncode({'error': 'Failed to upload file: $e'}),
         headers: {'Content-Type': 'application/json'},
       );
@@ -92,6 +115,54 @@ class FileRoutes {
 
   Future<Response> _getFile(Request request, String fileName) async {
     try {
+      final userId = request.context['userId'];
+      if (userId == null || userId is! String) {
+        return Response.unauthorized(
+          jsonEncode({'error': 'Unauthorized'}),
+          headers: {'Content-Type': 'application/json'},
+        );
+      }
+
+      final ObjectId userOid;
+      try {
+        userOid = ObjectId.fromHexString(userId);
+      } catch (e) {
+        return Response(
+          400,
+          body: jsonEncode({'error': 'Invalid user ID format'}),
+          headers: {'Content-Type': 'application/json'},
+        );
+      }
+
+      // Only participants of a conversation referencing this file may download it.
+      final isAuthorized = await _messageService.isFileSharedWithUser(
+        userOid,
+        '/api/files/$fileName',
+      );
+
+      // Group media is additionally accessible to group members.
+      final isGroupAuthorized = isAuthorized
+          ? false
+          : await _groupService.isGroupFileSharedWithUser(
+              userOid,
+              '/api/files/$fileName',
+            );
+
+      // Status media is accessible to the author and viewers.
+      final isStatusAuthorized = isAuthorized || isGroupAuthorized
+          ? false
+          : await _statusService.isStatusFileSharedWithUser(
+              userOid,
+              '/api/files/$fileName',
+            );
+
+      if (!isAuthorized && !isGroupAuthorized && !isStatusAuthorized) {
+        return Response.forbidden(
+          jsonEncode({'error': 'Not authorized to access this file'}),
+          headers: {'Content-Type': 'application/json'},
+        );
+      }
+
       final file = await _fileService.getFile(fileName);
       if (file == null) {
         return Response.notFound(
@@ -111,7 +182,8 @@ class FileRoutes {
         },
       );
     } catch (e) {
-      return Response(500,
+      return Response(
+        500,
         body: jsonEncode({'error': 'Failed to get file: $e'}),
         headers: {'Content-Type': 'application/json'},
       );

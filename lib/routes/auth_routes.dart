@@ -29,8 +29,8 @@ class AuthRoutes {
   // Protected routes — require a valid Bearer token
   Router get protectedRouter => Router()
     ..get('/profile', _getProfile)
-    ..put('/profile', _updateProfile);
-
+    ..put('/profile', _updateProfile)
+    ..post('/contacts/sync', _syncContacts);
 
   Future<Response> _refreshToken(Request request) async {
     try {
@@ -39,7 +39,8 @@ class AuthRoutes {
       final refreshToken = data['refresh_token'] as String?;
 
       if (refreshToken == null) {
-        return Response(400,
+        return Response(
+          400,
           body: jsonEncode({'error': 'Refresh token is required'}),
           headers: {'Content-Type': 'application/json'},
         );
@@ -58,7 +59,8 @@ class AuthRoutes {
         headers: {'Content-Type': 'application/json'},
       );
     } catch (e) {
-      return Response(500,
+      return Response(
+        500,
         body: jsonEncode({'error': 'Failed to refresh token: $e'}),
         headers: {'Content-Type': 'application/json'},
       );
@@ -75,7 +77,8 @@ class AuthRoutes {
       final message = data['message'] as String?;
 
       if (mobileNumber == null || mobileNumber.isEmpty) {
-        return Response(400,
+        return Response(
+          400,
           body: jsonEncode({'error': 'Mobile number is required'}),
           headers: {'Content-Type': 'application/json'},
         );
@@ -97,7 +100,8 @@ class AuthRoutes {
           headers: {'Content-Type': 'application/json'},
         );
       } else {
-        return Response(400,
+        return Response(
+          400,
           body: jsonEncode({
             'success': false,
             'error': result['error'],
@@ -106,7 +110,8 @@ class AuthRoutes {
         );
       }
     } catch (e) {
-      return Response(500,
+      return Response(
+        500,
         body: jsonEncode({'error': 'Failed to send OTP: $e'}),
         headers: {'Content-Type': 'application/json'},
       );
@@ -124,21 +129,24 @@ class AuthRoutes {
       final correlationId = data['correlation_id'] as String?;
 
       if (mobileNumber == null || mobileNumber.isEmpty) {
-        return Response(400,
+        return Response(
+          400,
           body: jsonEncode({'error': 'Mobile number is required'}),
           headers: {'Content-Type': 'application/json'},
         );
       }
 
       if (otpCode == null || otpCode.isEmpty) {
-        return Response(400,
+        return Response(
+          400,
           body: jsonEncode({'error': 'OTP code is required'}),
           headers: {'Content-Type': 'application/json'},
         );
       }
 
       if (correlationId == null || correlationId.isEmpty) {
-        return Response(400,
+        return Response(
+          400,
           body: jsonEncode({'error': 'Correlation ID is required'}),
           headers: {'Content-Type': 'application/json'},
         );
@@ -158,8 +166,10 @@ class AuthRoutes {
           user = await _userService.createUser(mobileNumber);
         }
 
-        final accessToken = _jwtService.generateAccessToken(user.id.toHexString(), user.phone);
-        final refreshToken = _jwtService.generateRefreshToken(user.id.toHexString());
+        final accessToken =
+            _jwtService.generateAccessToken(user.id.toHexString(), user.phone);
+        final refreshToken =
+            _jwtService.generateRefreshToken(user.id.toHexString());
 
         return Response.ok(
           jsonEncode({
@@ -172,7 +182,8 @@ class AuthRoutes {
           headers: {'Content-Type': 'application/json'},
         );
       } else {
-        return Response(400,
+        return Response(
+          400,
           body: jsonEncode({
             'success': false,
             'verified': false,
@@ -182,7 +193,8 @@ class AuthRoutes {
         );
       }
     } catch (e) {
-      return Response(500,
+      return Response(
+        500,
         body: jsonEncode({'error': 'Failed to verify OTP: $e'}),
         headers: {'Content-Type': 'application/json'},
       );
@@ -199,21 +211,24 @@ class AuthRoutes {
       final displayName = data['display_name'] as String?;
 
       if (email == null || email.isEmpty) {
-        return Response(400,
+        return Response(
+          400,
           body: jsonEncode({'error': 'Email is required'}),
           headers: {'Content-Type': 'application/json'},
         );
       }
 
       if (password == null || password.isEmpty) {
-        return Response(400,
+        return Response(
+          400,
           body: jsonEncode({'error': 'Password is required'}),
           headers: {'Content-Type': 'application/json'},
         );
       }
 
       if (password.length < 6) {
-        return Response(400,
+        return Response(
+          400,
           body: jsonEncode({'error': 'Password must be at least 6 characters'}),
           headers: {'Content-Type': 'application/json'},
         );
@@ -236,7 +251,8 @@ class AuthRoutes {
           headers: {'Content-Type': 'application/json'},
         );
       } else {
-        return Response(400,
+        return Response(
+          400,
           body: jsonEncode({
             'success': false,
             'error': result['error'],
@@ -245,7 +261,8 @@ class AuthRoutes {
         );
       }
     } catch (e) {
-      return Response(500,
+      return Response(
+        500,
         body: jsonEncode({'error': 'Failed to register: $e'}),
         headers: {'Content-Type': 'application/json'},
       );
@@ -261,14 +278,16 @@ class AuthRoutes {
       final password = data['password'] as String?;
 
       if (email == null || email.isEmpty) {
-        return Response(400,
+        return Response(
+          400,
           body: jsonEncode({'error': 'Email is required'}),
           headers: {'Content-Type': 'application/json'},
         );
       }
 
       if (password == null || password.isEmpty) {
-        return Response(400,
+        return Response(
+          400,
           body: jsonEncode({'error': 'Password is required'}),
           headers: {'Content-Type': 'application/json'},
         );
@@ -290,7 +309,8 @@ class AuthRoutes {
           headers: {'Content-Type': 'application/json'},
         );
       } else {
-        return Response(400,
+        return Response(
+          400,
           body: jsonEncode({
             'success': false,
             'error': result['error'],
@@ -299,7 +319,8 @@ class AuthRoutes {
         );
       }
     } catch (e) {
-      return Response(500,
+      return Response(
+        500,
         body: jsonEncode({'error': 'Failed to login: $e'}),
         headers: {'Content-Type': 'application/json'},
       );
@@ -316,21 +337,24 @@ class AuthRoutes {
       final displayName = data['display_name'] as String?;
 
       if (phone == null || phone.isEmpty) {
-        return Response(400,
+        return Response(
+          400,
           body: jsonEncode({'error': 'Phone number is required'}),
           headers: {'Content-Type': 'application/json'},
         );
       }
 
       if (password == null || password.isEmpty) {
-        return Response(400,
+        return Response(
+          400,
           body: jsonEncode({'error': 'Password is required'}),
           headers: {'Content-Type': 'application/json'},
         );
       }
 
       if (password.length < 6) {
-        return Response(400,
+        return Response(
+          400,
           body: jsonEncode({'error': 'Password must be at least 6 characters'}),
           headers: {'Content-Type': 'application/json'},
         );
@@ -353,7 +377,8 @@ class AuthRoutes {
           headers: {'Content-Type': 'application/json'},
         );
       } else {
-        return Response(400,
+        return Response(
+          400,
           body: jsonEncode({
             'success': false,
             'error': result['error'],
@@ -362,7 +387,8 @@ class AuthRoutes {
         );
       }
     } catch (e) {
-      return Response(500,
+      return Response(
+        500,
         body: jsonEncode({'error': 'Failed to register: $e'}),
         headers: {'Content-Type': 'application/json'},
       );
@@ -378,14 +404,16 @@ class AuthRoutes {
       final password = data['password'] as String?;
 
       if (phone == null || phone.isEmpty) {
-        return Response(400,
+        return Response(
+          400,
           body: jsonEncode({'error': 'Phone number is required'}),
           headers: {'Content-Type': 'application/json'},
         );
       }
 
       if (password == null || password.isEmpty) {
-        return Response(400,
+        return Response(
+          400,
           body: jsonEncode({'error': 'Password is required'}),
           headers: {'Content-Type': 'application/json'},
         );
@@ -407,7 +435,8 @@ class AuthRoutes {
           headers: {'Content-Type': 'application/json'},
         );
       } else {
-        return Response(400,
+        return Response(
+          400,
           body: jsonEncode({
             'success': false,
             'error': result['error'],
@@ -416,7 +445,8 @@ class AuthRoutes {
         );
       }
     } catch (e) {
-      return Response(500,
+      return Response(
+        500,
         body: jsonEncode({'error': 'Failed to login: $e'}),
         headers: {'Content-Type': 'application/json'},
       );
@@ -433,7 +463,8 @@ class AuthRoutes {
         );
       }
 
-      final user = await _userService.findUserById(ObjectId.fromHexString(userId));
+      final user =
+          await _userService.findUserById(ObjectId.fromHexString(userId));
       if (user == null) {
         return Response.notFound(
           jsonEncode({'error': 'User not found'}),
@@ -446,7 +477,8 @@ class AuthRoutes {
         headers: {'Content-Type': 'application/json'},
       );
     } catch (e) {
-      return Response(500,
+      return Response(
+        500,
         body: jsonEncode({'error': 'Failed to get profile: $e'}),
         headers: {'Content-Type': 'application/json'},
       );
@@ -483,7 +515,8 @@ class AuthRoutes {
         headers: {'Content-Type': 'application/json'},
       );
     } catch (e) {
-      return Response(500,
+      return Response(
+        500,
         body: jsonEncode({'error': 'Failed to update profile: $e'}),
         headers: {'Content-Type': 'application/json'},
       );
@@ -494,7 +527,8 @@ class AuthRoutes {
     try {
       final query = request.url.queryParameters['q'] ?? '';
       if (query.isEmpty) {
-        return Response(400,
+        return Response(
+          400,
           body: jsonEncode({'error': 'Search query is required'}),
           headers: {'Content-Type': 'application/json'},
         );
@@ -506,8 +540,44 @@ class AuthRoutes {
         headers: {'Content-Type': 'application/json'},
       );
     } catch (e) {
-      return Response(500,
+      return Response(
+        500,
         body: jsonEncode({'error': 'Failed to search users: $e'}),
+        headers: {'Content-Type': 'application/json'},
+      );
+    }
+  }
+
+  Future<Response> _syncContacts(Request request) async {
+    try {
+      final userId = request.context['userId'];
+      if (userId == null) {
+        return Response.unauthorized(
+          jsonEncode({'error': 'Unauthorized'}),
+          headers: {'Content-Type': 'application/json'},
+        );
+      }
+
+      final body = await request.readAsString();
+      final data = jsonDecode(body) as Map<String, dynamic>;
+      final hashes = (data['phone_hashes'] as List?)?.cast<String>() ?? [];
+
+      if (hashes.isEmpty) {
+        return Response.ok(
+          jsonEncode({'registered': []}),
+          headers: {'Content-Type': 'application/json'},
+        );
+      }
+
+      final users = await _userService.findUsersByPhoneHashes(hashes.toSet());
+      return Response.ok(
+        jsonEncode({'registered': users.map((u) => u.toJson()).toList()}),
+        headers: {'Content-Type': 'application/json'},
+      );
+    } catch (e) {
+      return Response(
+        500,
+        body: jsonEncode({'error': 'Failed to sync contacts: $e'}),
         headers: {'Content-Type': 'application/json'},
       );
     }

@@ -1,11 +1,13 @@
 import 'package:mongo_dart/mongo_dart.dart';
 
-/// Message model for MongoDB
-/// Represents a chat message in SecureChat
-class MessageModel {
+/// Group chat message model stored in the `group_messages` collection.
+///
+/// Group messages are stored once per group (sender_id + group_id), unlike 1:1
+/// messages which are stored per sender/receiver pair.
+class GroupMessageModel {
   final ObjectId id;
+  final ObjectId groupId;
   final ObjectId senderId;
-  final ObjectId receiverId;
   final String messageType;
   final String content;
   final String? filePath;
@@ -16,16 +18,15 @@ class MessageModel {
   final DateTime createdAt;
   final DateTime updatedAt;
 
-  // E2EE: for encrypted messages the server relays these opaque fields and
-  // never reads/parses the ciphertext. `content` stays empty.
+  // E2EE: opaque sender-key ciphertext fields relayed verbatim by the server.
   final String encryption;
   final int? cipherType;
   final String? cipherBody;
 
-  MessageModel({
+  GroupMessageModel({
     required this.id,
+    required this.groupId,
     required this.senderId,
-    required this.receiverId,
     required this.messageType,
     required this.content,
     this.filePath,
@@ -40,11 +41,11 @@ class MessageModel {
     this.cipherBody,
   });
 
-  factory MessageModel.fromMap(Map<String, dynamic> map) {
-    return MessageModel(
+  factory GroupMessageModel.fromMap(Map<String, dynamic> map) {
+    return GroupMessageModel(
       id: map['_id'] as ObjectId,
+      groupId: map['group_id'] as ObjectId,
       senderId: map['sender_id'] as ObjectId,
-      receiverId: map['receiver_id'] as ObjectId,
       messageType: map['message_type'] as String,
       content: map['content'] as String? ?? '',
       filePath: map['file_path'] as String?,
@@ -63,8 +64,8 @@ class MessageModel {
   Map<String, dynamic> toMap() {
     return {
       '_id': id,
+      'group_id': groupId,
       'sender_id': senderId,
-      'receiver_id': receiverId,
       'message_type': messageType,
       'content': content,
       'file_path': filePath,
@@ -83,8 +84,8 @@ class MessageModel {
   Map<String, dynamic> toJson() {
     return {
       'id': id.toHexString(),
+      'group_id': groupId.toHexString(),
       'sender_id': senderId.toHexString(),
-      'receiver_id': receiverId.toHexString(),
       'message_type': messageType,
       'content': content,
       'file_path': filePath,
@@ -100,10 +101,10 @@ class MessageModel {
     };
   }
 
-  MessageModel copyWith({
+  GroupMessageModel copyWith({
     ObjectId? id,
+    ObjectId? groupId,
     ObjectId? senderId,
-    ObjectId? receiverId,
     String? messageType,
     String? content,
     String? filePath,
@@ -117,10 +118,10 @@ class MessageModel {
     int? cipherType,
     String? cipherBody,
   }) {
-    return MessageModel(
+    return GroupMessageModel(
       id: id ?? this.id,
+      groupId: groupId ?? this.groupId,
       senderId: senderId ?? this.senderId,
-      receiverId: receiverId ?? this.receiverId,
       messageType: messageType ?? this.messageType,
       content: content ?? this.content,
       filePath: filePath ?? this.filePath,

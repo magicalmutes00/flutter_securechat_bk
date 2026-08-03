@@ -8,7 +8,8 @@ class JwtService {
 
   String generateAccessToken(String userId, String? phone, {String? email}) {
     final now = DateTime.now();
-    final expiry = now.add(Duration(minutes: AppConfig.jwtAccessTokenExpiryMinutes));
+    final expiry =
+        now.add(Duration(minutes: AppConfig.jwtAccessTokenExpiryMinutes));
 
     final claims = <String, dynamic>{
       'sub': userId,

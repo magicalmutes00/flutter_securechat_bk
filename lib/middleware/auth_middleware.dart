@@ -38,7 +38,8 @@ class AuthMiddleware {
           );
         }
 
-        final user = await _userService.findUserById(ObjectId.fromHexString(userId));
+        final user =
+            await _userService.findUserById(ObjectId.fromHexString(userId));
         if (user == null) {
           return Response.unauthorized(
             jsonEncode({'error': 'User not found'}),

@@ -11,7 +11,11 @@ class UserModel {
   final String? username;
   final String? displayName;
   final String? avatarUrl;
+  final String? about;
   final String? passwordHash; // For email/password auth
+  final String?
+      phoneHash; // SHA-256 of canonical phone, used for contacts discovery
+  final Map<String, String> privacy; // last_seen / avatar / about
   final DateTime createdAt;
   final DateTime updatedAt;
   final bool isOnline;
@@ -25,7 +29,14 @@ class UserModel {
     this.username,
     this.displayName,
     this.avatarUrl,
+    this.about,
     this.passwordHash,
+    this.phoneHash,
+    this.privacy = const {
+      'last_seen': 'everyone',
+      'avatar': 'everyone',
+      'about': 'everyone',
+    },
     required this.createdAt,
     required this.updatedAt,
     this.isOnline = false,
@@ -42,7 +53,13 @@ class UserModel {
       username: map['username'] as String?,
       displayName: map['display_name'] as String?,
       avatarUrl: map['avatar_url'] as String?,
+      about: map['about'] as String?,
       passwordHash: map['password_hash'] as String?,
+      phoneHash: map['phone_hash'] as String?,
+      privacy: (map['privacy'] as Map?)?.map(
+            (k, v) => MapEntry(k as String, v as String),
+          ) ??
+          const {},
       createdAt: map['created_at'] as DateTime,
       updatedAt: map['updated_at'] as DateTime,
       isOnline: map['is_online'] as bool? ?? false,
@@ -57,7 +74,10 @@ class UserModel {
       'username': username,
       'display_name': displayName,
       'avatar_url': avatarUrl,
+      'about': about,
       'password_hash': passwordHash,
+      'phone_hash': phoneHash,
+      'privacy': privacy,
       'created_at': createdAt,
       'updated_at': updatedAt,
       'is_online': isOnline,
@@ -80,10 +100,12 @@ class UserModel {
       'username': username,
       'display_name': displayName,
       'avatar_url': avatarUrl,
+      'about': about,
       'created_at': createdAt.toIso8601String(),
       'updated_at': updatedAt.toIso8601String(),
       'is_online': isOnline,
       'last_seen': lastSeen?.toIso8601String(),
+      'privacy': privacy,
     };
   }
 
@@ -96,7 +118,10 @@ class UserModel {
     String? username,
     String? displayName,
     String? avatarUrl,
+    String? about,
     String? passwordHash,
+    String? phoneHash,
+    Map<String, String>? privacy,
     DateTime? createdAt,
     DateTime? updatedAt,
     bool? isOnline,
@@ -110,7 +135,10 @@ class UserModel {
       username: username ?? this.username,
       displayName: displayName ?? this.displayName,
       avatarUrl: avatarUrl ?? this.avatarUrl,
+      about: about ?? this.about,
       passwordHash: passwordHash ?? this.passwordHash,
+      phoneHash: phoneHash ?? this.phoneHash,
+      privacy: privacy ?? this.privacy,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
       isOnline: isOnline ?? this.isOnline,

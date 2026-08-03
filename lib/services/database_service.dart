@@ -51,10 +51,58 @@ class DatabaseService {
         sparse: true,
       );
       await _database!.createIndex('users', keys: {'username': 1});
-      await _database!.createIndex('messages', keys: {'sender_id': 1, 'created_at': -1});
-      await _database!.createIndex('messages', keys: {'receiver_id': 1, 'created_at': -1});
-      await _database!.createIndex('messages', keys: {'sender_id': 1, 'receiver_id': 1, 'created_at': -1});
+      // Sparse unique index so each user has at most one phone hash.
+      await _database!.createIndex(
+        'users',
+        keys: {'phone_hash': 1},
+        unique: true,
+        sparse: true,
+      );
+      await _database!
+          .createIndex('messages', keys: {'sender_id': 1, 'created_at': -1});
+      await _database!
+          .createIndex('messages', keys: {'receiver_id': 1, 'created_at': -1});
+      await _database!.createIndex('messages',
+          keys: {'sender_id': 1, 'receiver_id': 1, 'created_at': -1});
       await _database!.createIndex('otp_codes', keys: {'phone': 1, 'code': 1});
+      // E2EE key bundles: one bundle per user per device.
+      await _database!.createIndex(
+        'keys',
+        keys: {'user_id': 1, 'device_id': 1},
+        unique: true,
+      );
+      // Groups: index member arrays so "groups a user belongs to" is fast, and
+      // unique index on the group name for O(1) title lookups.
+      await _database!.createIndex('groups', keys: {'member_ids': 1});
+      await _database!.createIndex(
+        'groups',
+        keys: {'name': 1},
+        unique: true,
+      );
+      await _database!.createIndex(
+        'group_messages',
+        keys: {'group_id': 1, 'created_at': -1},
+      );
+      await _database!.createIndex(
+        'group_messages',
+        keys: {'sender_id': 1, 'created_at': -1},
+      );
+      // Statuses: query active (non-expired) statuses efficiently.
+      await _database!.createIndex(
+        'statuses',
+        keys: {'expires_at': 1, 'created_at': -1},
+      );
+      await _database!.createIndex(
+        'statuses',
+        keys: {'user_id': 1, 'created_at': -1},
+      );
+      // Push tokens: unique per device token, indexed by owner.
+      await _database!.createIndex(
+        'push_tokens',
+        keys: {'token': 1},
+        unique: true,
+      );
+      await _database!.createIndex('push_tokens', keys: {'user_id': 1});
       // TTL index for OTP expiry requires MongoDB server-side setup
       print('Database indexes created successfully');
     } catch (e) {
@@ -65,6 +113,11 @@ class DatabaseService {
   DbCollection get users => _database!.collection('users');
   DbCollection get messages => _database!.collection('messages');
   DbCollection get otpCodes => _database!.collection('otp_codes');
+  DbCollection get keys => _database!.collection('keys');
+  DbCollection get groups => _database!.collection('groups');
+  DbCollection get groupMessages => _database!.collection('group_messages');
+  DbCollection get statuses => _database!.collection('statuses');
+  DbCollection get pushTokens => _database!.collection('push_tokens');
 
   Future<void> close() async {
     await _database?.close();

@@ -44,8 +44,7 @@ class FirebaseAuthService {
     if (certsResponse.statusCode != 200) {
       throw FirebaseAuthException('Could not fetch Google public keys');
     }
-    final certs =
-        jsonDecode(certsResponse.body) as Map<String, dynamic>;
+    final certs = jsonDecode(certsResponse.body) as Map<String, dynamic>;
     final certPem = certs[kid] as String?;
     if (certPem == null) {
       throw FirebaseAuthException('No matching key found for kid: $kid');
@@ -91,8 +90,9 @@ class FirebaseAuthService {
       email: email,
       displayName: displayName,
     );
-    final accessToken =
-        _jwtService.generateAccessToken(user.id.toHexString(), user.phone, email: user.email);
+    final accessToken = _jwtService.generateAccessToken(
+        user.id.toHexString(), user.phone,
+        email: user.email);
     final refreshToken =
         _jwtService.generateRefreshToken(user.id.toHexString());
 

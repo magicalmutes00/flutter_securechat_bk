@@ -11,6 +11,7 @@ class ChatRoutes {
   final UserService _userService = UserService();
 
   Router get router => Router()
+    ..get('/messages/search', _searchMessages)
     ..get('/messages/<userId>', _getMessages)
     ..get('/conversations', _getConversations)
     ..post('/message', _sendMessage)
@@ -33,7 +34,8 @@ class ChatRoutes {
         currentUserOid = ObjectId.fromHexString(currentUserId);
         otherUserOid = ObjectId.fromHexString(userId);
       } catch (e) {
-        return Response(400,
+        return Response(
+          400,
           body: jsonEncode({'error': 'Invalid user ID format'}),
           headers: {'Content-Type': 'application/json'},
         );
@@ -46,8 +48,10 @@ class ChatRoutes {
         );
       }
 
-      final limit = int.tryParse(request.url.queryParameters['limit'] ?? '50') ?? 50;
-      final skip = int.tryParse(request.url.queryParameters['skip'] ?? '0') ?? 0;
+      final limit =
+          int.tryParse(request.url.queryParameters['limit'] ?? '50') ?? 50;
+      final skip =
+          int.tryParse(request.url.queryParameters['skip'] ?? '0') ?? 0;
 
       final messages = await _messageService.getMessages(
         userId1: currentUserOid,
@@ -56,9 +60,10 @@ class ChatRoutes {
         skip: skip,
       );
 
-      final authorizedMessages = messages.where((m) =>
-        m.senderId == currentUserOid || m.receiverId == currentUserOid
-      ).toList();
+      final authorizedMessages = messages
+          .where((m) =>
+              m.senderId == currentUserOid || m.receiverId == currentUserOid)
+          .toList();
 
       return Response.ok(
         jsonEncode({
@@ -67,7 +72,8 @@ class ChatRoutes {
         headers: {'Content-Type': 'application/json'},
       );
     } catch (e) {
-      return Response(500,
+      return Response(
+        500,
         body: jsonEncode({'error': 'Failed to get messages: $e'}),
         headers: {'Content-Type': 'application/json'},
       );
@@ -92,7 +98,8 @@ class ChatRoutes {
       for (final conv in conversations) {
         final otherUserId = conv['_id'];
         if (otherUserId != null) {
-          final otherUser = await _userService.findUserById(otherUserId as ObjectId);
+          final otherUser =
+              await _userService.findUserById(otherUserId as ObjectId);
           if (otherUser != null) {
             result.add({
               'user': otherUser.toJson(),
@@ -108,8 +115,48 @@ class ChatRoutes {
         headers: {'Content-Type': 'application/json'},
       );
     } catch (e) {
-      return Response(500,
+      return Response(
+        500,
         body: jsonEncode({'error': 'Failed to get conversations: $e'}),
+        headers: {'Content-Type': 'application/json'},
+      );
+    }
+  }
+
+  Future<Response> _searchMessages(Request request) async {
+    try {
+      final currentUserId = request.context['userId'] as String?;
+      if (currentUserId == null) {
+        return Response.unauthorized(
+          jsonEncode({'error': 'Unauthorized'}),
+          headers: {'Content-Type': 'application/json'},
+        );
+      }
+
+      final query = request.url.queryParameters['q'] ?? '';
+      if (query.isEmpty) {
+        return Response(
+          400,
+          body: jsonEncode({'error': 'Query parameter "q" is required'}),
+          headers: {'Content-Type': 'application/json'},
+        );
+      }
+
+      final messages = await _messageService.searchMessages(
+        userId: ObjectId.fromHexString(currentUserId),
+        query: query,
+      );
+
+      return Response.ok(
+        jsonEncode({
+          'messages': messages.map((m) => m.toJson()).toList(),
+        }),
+        headers: {'Content-Type': 'application/json'},
+      );
+    } catch (e) {
+      return Response(
+        500,
+        body: jsonEncode({'error': 'Failed to search messages: $e'}),
         headers: {'Content-Type': 'application/json'},
       );
     }
@@ -129,15 +176,20 @@ class ChatRoutes {
       final data = jsonDecode(body) as Map<String, dynamic>;
 
       final receiverId = data['receiver_id'] as String?;
-      final messageType = data['message_type'] as String? ?? AppConfig.messageTypeText;
+      final messageType =
+          data['message_type'] as String? ?? AppConfig.messageTypeText;
       final content = data['content'] as String? ?? '';
       final fileUrl = data['file_url'] as String?;
       final fileName = data['file_name'] as String?;
       final fileSize = data['file_size'] as int?;
       final mediaType = data['media_type'] as String?;
+      final encryption = data['encryption'] as String? ?? 'none';
+      final cipherType = data['cipher_type'] as int?;
+      final cipherBody = data['cipher_body'] as String?;
 
       if (receiverId == null) {
-        return Response(400,
+        return Response(
+          400,
           body: jsonEncode({'error': 'Receiver ID is required'}),
           headers: {'Content-Type': 'application/json'},
         );
@@ -152,6 +204,9 @@ class ChatRoutes {
         fileName: fileName,
         fileSize: fileSize,
         mediaType: mediaType,
+        encryption: encryption,
+        cipherType: cipherType,
+        cipherBody: cipherBody,
       );
 
       return Response.ok(
@@ -159,28 +214,69 @@ class ChatRoutes {
         headers: {'Content-Type': 'application/json'},
       );
     } catch (e) {
-      return Response(500,
+      return Response(
+        500,
         body: jsonEncode({'error': 'Failed to send message: $e'}),
         headers: {'Content-Type': 'application/json'},
       );
     }
   }
 
-  Future<Response> _updateMessageStatus(Request request, String messageId) async {
+  Future<Response> _updateMessageStatus(
+      Request request, String messageId) async {
     try {
+      final currentUserId = request.context['userId'] as String?;
+      if (currentUserId == null) {
+        return Response.unauthorized(
+          jsonEncode({'error': 'Unauthorized'}),
+          headers: {'Content-Type': 'application/json'},
+        );
+      }
+
+      final ObjectId currentUserOid;
+      final ObjectId messageOid;
+      try {
+        currentUserOid = ObjectId.fromHexString(currentUserId);
+        messageOid = ObjectId.fromHexString(messageId);
+      } catch (e) {
+        return Response(
+          400,
+          body: jsonEncode({'error': 'Invalid ID format'}),
+          headers: {'Content-Type': 'application/json'},
+        );
+      }
+
+      final message = await _messageService.getMessageById(messageOid);
+      if (message == null) {
+        return Response.notFound(
+          jsonEncode({'error': 'Message not found'}),
+          headers: {'Content-Type': 'application/json'},
+        );
+      }
+
+      final isParticipant = message.senderId == currentUserOid ||
+          message.receiverId == currentUserOid;
+      if (!isParticipant) {
+        return Response.forbidden(
+          jsonEncode({'error': 'Not authorized to update this message'}),
+          headers: {'Content-Type': 'application/json'},
+        );
+      }
+
       final body = await request.readAsString();
       final data = jsonDecode(body) as Map<String, dynamic>;
       final status = data['status'] as String?;
 
       if (status == null) {
-        return Response(400,
+        return Response(
+          400,
           body: jsonEncode({'error': 'Status is required'}),
           headers: {'Content-Type': 'application/json'},
         );
       }
 
       await _messageService.updateMessageStatus(
-        ObjectId.fromHexString(messageId),
+        messageOid,
         status,
       );
 
@@ -189,7 +285,8 @@ class ChatRoutes {
         headers: {'Content-Type': 'application/json'},
       );
     } catch (e) {
-      return Response(500,
+      return Response(
+        500,
         body: jsonEncode({'error': 'Failed to update message status: $e'}),
         headers: {'Content-Type': 'application/json'},
       );
@@ -198,14 +295,51 @@ class ChatRoutes {
 
   Future<Response> _deleteMessage(Request request, String messageId) async {
     try {
-      await _messageService.deleteMessage(ObjectId.fromHexString(messageId));
+      final currentUserId = request.context['userId'] as String?;
+      if (currentUserId == null) {
+        return Response.unauthorized(
+          jsonEncode({'error': 'Unauthorized'}),
+          headers: {'Content-Type': 'application/json'},
+        );
+      }
+
+      final ObjectId currentUserOid;
+      final ObjectId messageOid;
+      try {
+        currentUserOid = ObjectId.fromHexString(currentUserId);
+        messageOid = ObjectId.fromHexString(messageId);
+      } catch (e) {
+        return Response(
+          400,
+          body: jsonEncode({'error': 'Invalid ID format'}),
+          headers: {'Content-Type': 'application/json'},
+        );
+      }
+
+      final message = await _messageService.getMessageById(messageOid);
+      if (message == null) {
+        return Response.notFound(
+          jsonEncode({'error': 'Message not found'}),
+          headers: {'Content-Type': 'application/json'},
+        );
+      }
+
+      if (message.senderId != currentUserOid) {
+        return Response.forbidden(
+          jsonEncode({'error': 'Only the sender can delete this message'}),
+          headers: {'Content-Type': 'application/json'},
+        );
+      }
+
+      await _messageService.deleteMessage(messageOid);
 
       return Response.ok(
         jsonEncode({'success': true}),
         headers: {'Content-Type': 'application/json'},
       );
     } catch (e) {
-      return Response(500,
+      return Response(
+        500,
         body: jsonEncode({'error': 'Failed to delete message: $e'}),
         headers: {'Content-Type': 'application/json'},
       );

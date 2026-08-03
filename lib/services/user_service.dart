@@ -1,3 +1,6 @@
+import 'dart:convert';
+
+import 'package:crypto/crypto.dart';
 import 'package:mongo_dart/mongo_dart.dart';
 import '../models/user_model.dart';
 import 'database_service.dart';
@@ -48,13 +51,15 @@ class UserService {
     return UserModel.fromMap(userData);
   }
 
-  Future<UserModel> createUser(String phone, {String? username, String? displayName}) async {
+  Future<UserModel> createUser(String phone,
+      {String? username, String? displayName}) async {
     final now = DateTime.now();
     final user = UserModel(
       id: ObjectId(),
       phone: phone,
       username: username,
       displayName: displayName ?? phone,
+      phoneHash: _hashPhone(phone),
       createdAt: now,
       updatedAt: now,
     );
@@ -93,6 +98,7 @@ class UserService {
       phone: phone,
       passwordHash: passwordHash,
       displayName: displayName ?? phone,
+      phoneHash: _hashPhone(phone),
       createdAt: now,
       updatedAt: now,
     );
@@ -113,7 +119,8 @@ class UserService {
       firebaseUid: firebaseUid,
       phone: phone,
       email: email,
-      displayName: displayName ?? (email != null ? email.split('@').first : null),
+      displayName:
+          displayName ?? (email != null ? email.split('@').first : null),
       createdAt: now,
       updatedAt: now,
     );
@@ -130,9 +137,10 @@ class UserService {
   }) async {
     // First, try to find user by Firebase UID (most reliable)
     var user = await findUserByFirebaseUid(firebaseUid);
-    
+
     if (user != null) {
-      user = await _updateUserIfNeeded(user, phone: phone, email: email, displayName: displayName);
+      user = await _updateUserIfNeeded(user,
+          phone: phone, email: email, displayName: displayName);
       return user;
     }
 
@@ -161,7 +169,8 @@ class UserService {
   }
 
   /// Update user with new information if available
-  Future<UserModel> _updateUserIfNeeded(UserModel user, {String? phone, String? email, String? displayName}) async {
+  Future<UserModel> _updateUserIfNeeded(UserModel user,
+      {String? phone, String? email, String? displayName}) async {
     bool needsUpdate = false;
     final updates = <String, dynamic>{};
 
@@ -183,9 +192,12 @@ class UserService {
     if (needsUpdate) {
       updates['updated_at'] = DateTime.now();
       var modifier = modify.set('updated_at', updates['updated_at']);
-      if (updates.containsKey('phone')) modifier = modifier.set('phone', updates['phone']);
-      if (updates.containsKey('email')) modifier = modifier.set('email', updates['email']);
-      if (updates.containsKey('display_name')) modifier = modifier.set('display_name', updates['display_name']);
+      if (updates.containsKey('phone'))
+        modifier = modifier.set('phone', updates['phone']);
+      if (updates.containsKey('email'))
+        modifier = modifier.set('email', updates['email']);
+      if (updates.containsKey('display_name'))
+        modifier = modifier.set('display_name', updates['display_name']);
       await _db.users.updateOne(
         where.eq('_id', user.id),
         modifier,
@@ -197,7 +209,8 @@ class UserService {
   }
 
   /// Link an existing user to a Firebase UID
-  Future<UserModel> _linkFirebaseUidToUser(ObjectId userId, String firebaseUid) async {
+  Future<UserModel> _linkFirebaseUidToUser(
+      ObjectId userId, String firebaseUid) async {
     await _db.users.updateOne(
       where.eq('_id', userId),
       modify.set('firebase_uid', firebaseUid).set('updated_at', DateTime.now()),
@@ -214,18 +227,47 @@ class UserService {
     return user;
   }
 
-  Future<UserModel?> updateUser(ObjectId id, Map<String, dynamic> updates) async {
+  Future<UserModel?> updateUser(
+      ObjectId id, Map<String, dynamic> updates) async {
     var modifyUpdate = modify.set('updated_at', DateTime.now());
 
-    if (updates.containsKey('display_name') && updates['display_name'] != null) {
+    if (updates.containsKey('display_name') &&
+        updates['display_name'] != null) {
       modifyUpdate = modifyUpdate.set('display_name', updates['display_name']);
     }
     if (updates.containsKey('username') && updates['username'] != null) {
       modifyUpdate = modifyUpdate.set('username', updates['username']);
     }
+    if (updates.containsKey('avatar_url') && updates['avatar_url'] != null) {
+      modifyUpdate = modifyUpdate.set('avatar_url', updates['avatar_url']);
+    }
+    if (updates.containsKey('about') && updates['about'] != null) {
+      modifyUpdate = modifyUpdate.set('about', updates['about']);
+    }
+    if (updates.containsKey('privacy') && updates['privacy'] is Map) {
+      modifyUpdate = modifyUpdate.set('privacy', updates['privacy']);
+    }
 
     await _db.users.updateOne(where.eq('_id', id), modifyUpdate);
     return findUserById(id);
+  }
+
+  /// Returns registered users whose phone numbers match any of the supplied
+  /// SHA-256 hashes. Used for privacy-preserving contact discovery.
+  Future<List<UserModel>> findUsersByPhoneHashes(Set<String> hashes) async {
+    final users = await _db.users.find(where.ne('phone', null)).toList();
+    final matched = <UserModel>[];
+    for (final userData in users) {
+      final user = UserModel.fromMap(userData);
+      if (user.phone != null && hashes.contains(_hashPhone(user.phone!))) {
+        matched.add(user);
+      }
+    }
+    return matched;
+  }
+
+  static String _hashPhone(String phone) {
+    return sha256.convert(utf8.encode(phone.trim())).toString();
   }
 
   Future<void> updateOnlineStatus(ObjectId id, bool isOnline) async {
@@ -237,13 +279,15 @@ class UserService {
 
   /// Search users by phone, username, display name, or email
   Future<List<UserModel>> searchUsers(String query) async {
-    final users = await _db.users.find(
-      where
-          .match('phone', query)
-          .or(where.match('username', query))
-          .or(where.match('display_name', query))
-          .or(where.match('email', query)),
-    ).toList();
+    final users = await _db.users
+        .find(
+          where
+              .match('phone', query)
+              .or(where.match('username', query))
+              .or(where.match('display_name', query))
+              .or(where.match('email', query)),
+        )
+        .toList();
     return users.map((u) => UserModel.fromMap(u)).toList();
   }
 

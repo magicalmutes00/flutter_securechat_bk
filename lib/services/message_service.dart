@@ -15,6 +15,9 @@ class MessageService {
     String? fileName,
     int? fileSize,
     String? mediaType,
+    String encryption = 'none',
+    int? cipherType,
+    String? cipherBody,
   }) async {
     final now = DateTime.now();
     final message = MessageModel(
@@ -30,6 +33,9 @@ class MessageService {
       status: AppConfig.messageStatusSent,
       createdAt: now,
       updatedAt: now,
+      encryption: encryption,
+      cipherType: cipherType,
+      cipherBody: cipherBody,
     );
     await _db.messages.insertOne(message.toMap());
     return message;
@@ -64,7 +70,8 @@ class MessageService {
     );
   }
 
-  Future<void> markMessagesAsRead(ObjectId senderId, ObjectId receiverId) async {
+  Future<void> markMessagesAsRead(
+      ObjectId senderId, ObjectId receiverId) async {
     await _db.messages.updateMany(
       where.eq('sender_id', senderId).eq('receiver_id', receiverId),
       modify.set('status', AppConfig.messageStatusRead),
@@ -73,6 +80,39 @@ class MessageService {
 
   Future<void> deleteMessage(ObjectId id) async {
     await _db.messages.deleteOne(where.eq('_id', id));
+  }
+
+  /// Returns true if the file referenced by [fileUrl] belongs to a message in a
+  /// conversation that [userId] is a participant of.
+  Future<bool> isFileSharedWithUser(ObjectId userId, String fileUrl) async {
+    final result = await _db.messages.findOne({
+      'file_path': fileUrl,
+      r'$or': [
+        {'sender_id': userId},
+        {'receiver_id': userId},
+      ],
+    });
+    return result != null;
+  }
+
+  /// Searches plaintext message content across conversations [userId] is a
+  /// participant of, newest first.
+  Future<List<MessageModel>> searchMessages({
+    required ObjectId userId,
+    required String query,
+    int limit = 50,
+  }) async {
+    if (query.isEmpty) return [];
+
+    final search = where
+        .match('content', RegExp(query, caseSensitive: false).pattern)
+        .or(where.eq('sender_id', userId))
+        .or(where.eq('receiver_id', userId))
+        .sortBy('created_at', descending: true)
+        .limit(limit);
+
+    final result = await _db.messages.find(search).toList();
+    return result.map((m) => MessageModel.fromMap(m)).toList();
   }
 
   /// Returns distinct conversation partners and their latest message for a user.
@@ -86,12 +126,16 @@ class MessageService {
           ]
         }
       },
-      {'\$sort': {'created_at': -1}},
+      {
+        '\$sort': {'created_at': -1}
+      },
       {
         '\$group': {
           '_id': {
             '\$cond': [
-              {'\$eq': ['\$sender_id', userId]},
+              {
+                '\$eq': ['\$sender_id', userId]
+              },
               '\$receiver_id',
               '\$sender_id',
             ]
@@ -102,8 +146,12 @@ class MessageService {
               '\$cond': [
                 {
                   '\$and': [
-                    {'\$eq': ['\$receiver_id', userId]},
-                    {'\$ne': ['\$status', AppConfig.messageStatusRead]},
+                    {
+                      '\$eq': ['\$receiver_id', userId]
+                    },
+                    {
+                      '\$ne': ['\$status', AppConfig.messageStatusRead]
+                    },
                   ]
                 },
                 1,

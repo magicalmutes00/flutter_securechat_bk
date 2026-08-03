@@ -12,18 +12,25 @@ class FileService {
     required String type,
   }) async {
     try {
-      final extension = p.extension(file.path).toLowerCase().replaceFirst('.', '');
+      final extension =
+          p.extension(file.path).toLowerCase().replaceFirst('.', '');
       if (!AppConfig.allowedFileExtensions.containsKey(type)) {
         return {'success': false, 'message': 'Invalid file type category'};
       }
 
       if (!AppConfig.allowedFileExtensions[type]!.contains(extension)) {
-        return {'success': false, 'message': 'File extension not allowed for $type'};
+        return {
+          'success': false,
+          'message': 'File extension not allowed for $type'
+        };
       }
 
       final fileSize = await file.length();
       if (fileSize > AppConfig.maxFileSizeBytes) {
-        return {'success': false, 'message': 'File size exceeds maximum allowed size'};
+        return {
+          'success': false,
+          'message': 'File size exceeds maximum allowed size'
+        };
       }
 
       final folder = AppConfig.uploadFolders[type];
@@ -56,7 +63,9 @@ class FileService {
   }
 
   Future<File?> getFile(String fileName) async {
-    if (fileName.contains('..') || fileName.contains('/') || fileName.contains('\\')) {
+    if (fileName.contains('..') ||
+        fileName.contains('/') ||
+        fileName.contains('\\')) {
       return null;
     }
 

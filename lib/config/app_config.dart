@@ -8,51 +8,76 @@ class AppConfig {
 
   // Server Configuration
   static String get serverHost => EnvConfig.get('SERVER_HOST') ?? '0.0.0.0';
-  static int get serverPort => int.tryParse(EnvConfig.get('SERVER_PORT') ?? '8080') ?? 8080;
-  static String get serverBaseUrl => EnvConfig.get('SERVER_BASE_URL') ?? 'http://localhost:8080';
+  static int get serverPort =>
+      int.tryParse(EnvConfig.get('SERVER_PORT') ?? '8080') ?? 8080;
+  static String get serverBaseUrl =>
+      EnvConfig.get('SERVER_BASE_URL') ?? 'http://localhost:8080';
 
   // WebSocket Configuration
   static String get wsPath => EnvConfig.get('WS_PATH') ?? '/ws';
-  static int get wsPingIntervalSeconds => int.tryParse(EnvConfig.get('WS_PING_INTERVAL') ?? '30') ?? 30;
-  static int get wsConnectionTimeoutSeconds => int.tryParse(EnvConfig.get('WS_CONNECTION_TIMEOUT') ?? '60') ?? 60;
+  static int get wsPingIntervalSeconds =>
+      int.tryParse(EnvConfig.get('WS_PING_INTERVAL') ?? '30') ?? 30;
+  static int get wsConnectionTimeoutSeconds =>
+      int.tryParse(EnvConfig.get('WS_CONNECTION_TIMEOUT') ?? '60') ?? 60;
 
   // MongoDB Configuration
   static String get mongoHost => EnvConfig.get('MONGO_HOST') ?? 'localhost';
-  static int get mongoPort => int.tryParse(EnvConfig.get('MONGO_PORT') ?? '27017') ?? 27017;
-  static String get mongoDatabase => EnvConfig.get('MONGO_DATABASE') ?? 'securechat';
-  static String get mongoConnectionString => EnvConfig.get('MONGO_CONNECTION_STRING') ?? 'mongodb://localhost:27017/securechat';
+  static int get mongoPort =>
+      int.tryParse(EnvConfig.get('MONGO_PORT') ?? '27017') ?? 27017;
+  static String get mongoDatabase =>
+      EnvConfig.get('MONGO_DATABASE') ?? 'securechat';
+  static String get mongoConnectionString =>
+      EnvConfig.get('MONGO_CONNECTION_STRING') ??
+      'mongodb://localhost:27017/securechat';
 
   // JWT Configuration (REQUIRED - must be set via environment)
   static String get jwtSecret => EnvConfig.getRequired('JWT_SECRET');
-  static String get jwtIssuer => EnvConfig.get('JWT_ISSUER') ?? 'securechat-server';
-  static int get jwtAccessTokenExpiryMinutes => int.tryParse(EnvConfig.get('JWT_ACCESS_TOKEN_EXPIRY_MINUTES') ?? '1440') ?? 1440;
-  static int get jwtRefreshTokenExpiryDays => int.tryParse(EnvConfig.get('JWT_REFRESH_TOKEN_EXPIRY_DAYS') ?? '30') ?? 30;
+  static String get jwtIssuer =>
+      EnvConfig.get('JWT_ISSUER') ?? 'securechat-server';
+  static int get jwtAccessTokenExpiryMinutes =>
+      int.tryParse(
+          EnvConfig.get('JWT_ACCESS_TOKEN_EXPIRY_MINUTES') ?? '1440') ??
+      1440;
+  static int get jwtRefreshTokenExpiryDays =>
+      int.tryParse(EnvConfig.get('JWT_REFRESH_TOKEN_EXPIRY_DAYS') ?? '30') ??
+      30;
   static String get jwtAlgorithm => EnvConfig.get('JWT_ALGORITHM') ?? 'HS256';
 
   // OTP Configuration (MessageCentral API - REQUIRED)
-  static String get messageCentralBaseUrl => EnvConfig.get('MESSAGE_CENTRAL_BASE_URL') ?? 'https://api.messagecentral.com';
-  static String get messageCentralApiKey => EnvConfig.getRequired('MESSAGE_CENTRAL_API_KEY');
-  static String get messageCentralCustomerId => EnvConfig.getRequired('MESSAGE_CENTRAL_CUSTOMER_ID');
-  static int get otpLength => int.tryParse(EnvConfig.get('OTP_LENGTH') ?? '6') ?? 6;
-  static int get otpExpiryMinutes => int.tryParse(EnvConfig.get('OTP_EXPIRY_MINUTES') ?? '5') ?? 5;
-  static int get otpMaxAttempts => int.tryParse(EnvConfig.get('OTP_MAX_ATTEMPTS') ?? '3') ?? 3;
+  static String get messageCentralBaseUrl =>
+      EnvConfig.get('MESSAGE_CENTRAL_BASE_URL') ??
+      'https://api.messagecentral.com';
+  static String get messageCentralApiKey =>
+      EnvConfig.getRequired('MESSAGE_CENTRAL_API_KEY');
+  static String get messageCentralCustomerId =>
+      EnvConfig.getRequired('MESSAGE_CENTRAL_CUSTOMER_ID');
+  static int get otpLength =>
+      int.tryParse(EnvConfig.get('OTP_LENGTH') ?? '6') ?? 6;
+  static int get otpExpiryMinutes =>
+      int.tryParse(EnvConfig.get('OTP_EXPIRY_MINUTES') ?? '5') ?? 5;
+  static int get otpMaxAttempts =>
+      int.tryParse(EnvConfig.get('OTP_MAX_ATTEMPTS') ?? '3') ?? 3;
+  static bool get otpDevMode => EnvConfig.get('OTP_DEV_MODE') == 'true';
 
   // File Upload Configuration
-  static String get uploadDirectory => EnvConfig.get('UPLOAD_DIRECTORY') ?? 'uploads';
+  static String get uploadDirectory =>
+      EnvConfig.get('UPLOAD_DIRECTORY') ?? 'uploads';
   static Map<String, String> get uploadFolders => {
-    'image': EnvConfig.get('UPLOAD_FOLDER_IMAGES') ?? 'uploads/images',
-    'video': EnvConfig.get('UPLOAD_FOLDER_VIDEOS') ?? 'uploads/videos',
-    'audio': EnvConfig.get('UPLOAD_FOLDER_AUDIO') ?? 'uploads/audio',
-    'document': EnvConfig.get('UPLOAD_FOLDER_DOCS') ?? 'uploads/docs',
-  };
+        'image': EnvConfig.get('UPLOAD_FOLDER_IMAGES') ?? 'uploads/images',
+        'video': EnvConfig.get('UPLOAD_FOLDER_VIDEOS') ?? 'uploads/videos',
+        'audio': EnvConfig.get('UPLOAD_FOLDER_AUDIO') ?? 'uploads/audio',
+        'document': EnvConfig.get('UPLOAD_FOLDER_DOCS') ?? 'uploads/docs',
+      };
 
-  static int get maxFileSizeBytes => int.tryParse(EnvConfig.get('MAX_FILE_SIZE_BYTES') ?? '52428800') ?? 52428800;
+  static int get maxFileSizeBytes =>
+      int.tryParse(EnvConfig.get('MAX_FILE_SIZE_BYTES') ?? '52428800') ??
+      52428800;
   static Map<String, List<String>> get allowedFileExtensions => {
-    'image': ['jpg', 'jpeg', 'png', 'gif', 'webp'],
-    'video': ['mp4', 'mov', 'avi', 'mkv', 'webm'],
-    'audio': ['mp3', 'wav', 'aac', 'm4a', 'ogg'],
-    'document': ['pdf', 'doc', 'docx', 'txt', 'xls', 'xlsx', 'ppt', 'pptx'],
-  };
+        'image': ['jpg', 'jpeg', 'png', 'gif', 'webp'],
+        'video': ['mp4', 'mov', 'avi', 'mkv', 'webm'],
+        'audio': ['mp3', 'wav', 'aac', 'm4a', 'ogg'],
+        'document': ['pdf', 'doc', 'docx', 'txt', 'xls', 'xlsx', 'ppt', 'pptx'],
+      };
 
   // CORS Configuration
   static List<String> get corsAllowedOrigins {
@@ -69,13 +94,33 @@ class AppConfig {
   }
 
   // Rate Limiting
-  static int get rateLimitMaxRequests => int.tryParse(EnvConfig.get('RATE_LIMIT_MAX_REQUESTS') ?? '100') ?? 100;
-  static int get rateLimitWindowMinutes => int.tryParse(EnvConfig.get('RATE_LIMIT_WINDOW_MINUTES') ?? '1') ?? 1;
+  static int get rateLimitMaxRequests =>
+      int.tryParse(EnvConfig.get('RATE_LIMIT_MAX_REQUESTS') ?? '100') ?? 100;
+  static int get rateLimitWindowMinutes =>
+      int.tryParse(EnvConfig.get('RATE_LIMIT_WINDOW_MINUTES') ?? '1') ?? 1;
 
   // Message Status Types
   static String get messageStatusSent => 'sent';
   static String get messageStatusDelivered => 'delivered';
   static String get messageStatusRead => 'read';
+
+  // WebRTC / Call Configuration
+  // STUN servers help peers discover their public IPs; TURN (coturn) relays
+  // media when a direct peer-to-peer connection is blocked by NAT/firewalls.
+  static List<String> get stunServers {
+    final stun = EnvConfig.get('STUN_SERVERS');
+    if (stun != null && stun.isNotEmpty) {
+      return stun.split(',').map((e) => e.trim()).toList();
+    }
+    return [
+      'stun:stun.l.google.com:19302',
+      'stun:stun1.l.google.com:19302',
+    ];
+  }
+
+  static String? get turnServerUrl => EnvConfig.get('TURN_SERVER_URL');
+  static String? get turnUsername => EnvConfig.get('TURN_USERNAME');
+  static String? get turnCredential => EnvConfig.get('TURN_CREDENTIAL');
 
   // Message Types
   static String get messageTypeText => 'text';
@@ -83,4 +128,13 @@ class AppConfig {
   static String get messageTypeVideo => 'video';
   static String get messageTypeAudio => 'audio';
   static String get messageTypeDocument => 'document';
+
+  // Push Notifications (FCM legacy HTTP API; optional)
+  static String get fcmEndpoint =>
+      EnvConfig.get('FCM_ENDPOINT') ?? 'https://fcm.googleapis.com/fcm/send';
+  static String? get fcmServerKey => EnvConfig.get('FCM_SERVER_KEY');
+
+  // TLS
+  static String? get tlsCertPath => EnvConfig.get('TLS_CERT_PATH');
+  static String? get tlsKeyPath => EnvConfig.get('TLS_KEY_PATH');
 }

@@ -1,0 +1,20 @@
+# Environment / secrets - never commit these
+.env
+
+# Dart/Flutter tooling
+.dart_tool/
+.packages
+build/
+*.g.dart
+*.freezed.dart
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# OS
+.DS_Store
+
+# Runtime data
+uploads/

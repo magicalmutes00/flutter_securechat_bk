@@ -1,7 +1,6 @@
-import 'package:crypto/crypto.dart';
-import 'dart:convert';
 import '../services/user_service.dart';
 import '../services/jwt_service.dart';
+import '../services/password_service.dart';
 
 class PhoneAuthService {
   final UserService _userService = UserService();
@@ -17,11 +16,14 @@ class PhoneAuthService {
       // Check if user already exists
       final existingUser = await _userService.findUserByPhone(phone);
       if (existingUser != null) {
-        return {'success': false, 'error': 'An account already exists with this phone number'};
+        return {
+          'success': false,
+          'error': 'An account already exists with this phone number'
+        };
       }
 
       // Hash the password
-      final passwordHash = _hashPassword(password);
+      final passwordHash = PasswordService.hashPassword(password);
 
       // Create new user
       final user = await _userService.createUserWithPhone(
@@ -36,7 +38,8 @@ class PhoneAuthService {
         user.phone,
         email: user.email,
       );
-      final refreshToken = _jwtService.generateRefreshToken(user.id.toHexString());
+      final refreshToken =
+          _jwtService.generateRefreshToken(user.id.toHexString());
 
       return {
         'success': true,
@@ -57,13 +60,20 @@ class PhoneAuthService {
     try {
       final user = await _userService.findUserByPhoneWithPassword(phone);
       if (user == null) {
-        return {'success': false, 'error': 'No account found with this phone number'};
+        return {
+          'success': false,
+          'error': 'No account found with this phone number'
+        };
       }
 
       // Check password
       final storedHash = user.passwordHash;
-      if (storedHash == null || !_verifyPassword(password, storedHash)) {
-        return {'success': false, 'error': 'Incorrect password. Please try again'};
+      if (storedHash == null ||
+          !PasswordService.verifyPassword(password, storedHash)) {
+        return {
+          'success': false,
+          'error': 'Incorrect password. Please try again'
+        };
       }
 
       // Generate tokens
@@ -72,7 +82,8 @@ class PhoneAuthService {
         user.phone,
         email: user.email,
       );
-      final refreshToken = _jwtService.generateRefreshToken(user.id.toHexString());
+      final refreshToken =
+          _jwtService.generateRefreshToken(user.id.toHexString());
 
       return {
         'success': true,
@@ -83,15 +94,5 @@ class PhoneAuthService {
     } catch (e) {
       return {'success': false, 'error': 'Login failed: $e'};
     }
-  }
-
-  String _hashPassword(String password) {
-    final bytes = utf8.encode(password);
-    final digest = sha256.convert(bytes);
-    return digest.toString();
-  }
-
-  bool _verifyPassword(String password, String hash) {
-    return _hashPassword(password) == hash;
   }
 }
