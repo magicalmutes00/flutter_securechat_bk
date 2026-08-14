@@ -1,0 +1,28 @@
+Database indexes created successfully
+MongoDB connected successfully
+Database initialized
+Server running on ws://0.0.0.0:8081
+2026-08-14T22:03:36.317095  0:00:00.009584 GET     [200] /health
+2026-08-14T22:06:46.860149  0:00:01.643064 POST    [401] /api/auth/public/verify-firebase-token
+2026-08-14T22:06:59.497398  0:00:00.143246 POST    [401] /api/auth/public/verify-firebase-token
+2026-08-14T22:07:17.054490  0:00:00.001819 POST    [500] /api/auth/public/verify-firebase-token
+2026-08-14T22:07:25.793996  0:00:00.161740 POST    [401] /api/auth/public/verify-firebase-token
+2026-08-14T22:10:12.573491  0:00:00.568761 POST    [200] /api/auth/public/verify-firebase-token
+2026-08-14T22:10:14.060127  0:00:00.009906 GET     [200] /api/groups/groups
+2026-08-14T22:10:14.103046  0:00:00.009053 GET     [200] /api/status/statuses
+2026-08-14T22:10:14.108068  0:00:00.082848 GET     [200] /api/chat/conversations
+2026-08-14T22:10:14.246594  0:00:00.006430 POST    [200] /api/push/register-token
+2026-08-14T22:10:21.895852  0:00:00.011099 GET     [200] /api/auth/public/users/search?q=r
+2026-08-14T22:10:22.252049  0:00:00.007164 GET     [200] /api/auth/public/users/search?q=ru
+2026-08-14T22:10:22.331991  0:00:00.002067 GET     [200] /api/auth/public/users/search?q=rub
+2026-08-14T22:10:22.423035  0:00:00.001965 GET     [200] /api/auth/public/users/search?q=rubi
+2026-08-14T22:10:23.278818  0:00:00.001951 GET     [200] /api/auth/public/users/search?q=rub
+2026-08-14T22:10:24.317336  0:00:00.001823 GET     [200] /api/auth/public/users/search?q=ru
+2026-08-14T22:10:25.628222  0:00:00.003037 GET     [200] /api/auth/public/users/search?q=r
+2026-08-14T22:10:32.233184  0:00:00.024409 GET     [200] /api/chat/messages/69e4a3b1af93cc1eb9000000?limit=50&skip=0
+2026-08-14T22:10:39.503808  0:00:00.008050 GET     [200] /api/chat/messages/69e4a3b1af93cc1eb9000000?limit=50&skip=0
+2026-08-14T22:10:39.510732  0:00:00.009509 PUT     [200] /api/keys/upload
+2026-08-14T22:10:39.584719  0:00:00.004349 GET     [404] /api/keys/bundle/69e4a3b1af93cc1eb9000000
+2026-08-14T22:11:56.974225  0:00:00.000273 GET     [200] /health
+2026-08-14T22:12:48.730492  0:00:00.000301 GET     [200] /health
+2026-08-14T22:25:47.940817  0:00:00.000317 GET     [200] /health

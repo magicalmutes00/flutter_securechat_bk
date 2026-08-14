@@ -7,6 +7,7 @@ import '../services/jwt_service.dart';
 import '../services/otp_service.dart';
 import '../services/email_auth_service.dart';
 import '../services/phone_auth_service.dart';
+import '../services/firebase_auth_service.dart';
 
 class AuthRoutes {
   final UserService _userService = UserService();
@@ -14,10 +15,12 @@ class AuthRoutes {
   final OtpService _otpService = OtpService();
   final EmailAuthService _emailAuthService = EmailAuthService();
   final PhoneAuthService _phoneAuthService = PhoneAuthService();
+  final FirebaseAuthService _firebaseAuthService = FirebaseAuthService();
 
   // Public routes — no authentication required
   Router get publicRouter => Router()
     ..post('/refresh-token', _refreshToken)
+    ..post('/verify-firebase-token', _verifyFirebaseToken)
     ..post('/send-otp', _sendOtp)
     ..post('/verify-otp', _verifyOtp)
     ..post('/register-email', _registerEmail)
@@ -62,6 +65,43 @@ class AuthRoutes {
       return Response(
         500,
         body: jsonEncode({'error': 'Failed to refresh token: $e'}),
+        headers: {'Content-Type': 'application/json'},
+      );
+    }
+  }
+
+  /// Exchanges a Firebase ID token (issued by the mobile app after phone/email
+  /// verification) for a SecureChat JWT session.
+  Future<Response> _verifyFirebaseToken(Request request) async {
+    try {
+      final body = await request.readAsString();
+      final data = jsonDecode(body) as Map<String, dynamic>;
+      final idToken = data['id_token'] as String?;
+
+      if (idToken == null || idToken.isEmpty) {
+        return Response(
+          400,
+          body: jsonEncode({'error': 'Firebase ID token is required'}),
+          headers: {'Content-Type': 'application/json'},
+        );
+      }
+
+      final result =
+          await _firebaseAuthService.verifyTokenAndAuthenticate(idToken);
+
+      return Response.ok(
+        jsonEncode(result),
+        headers: {'Content-Type': 'application/json'},
+      );
+    } on FirebaseAuthException catch (e) {
+      return Response.unauthorized(
+        jsonEncode({'error': e.message, 'code': 'invalid_firebase_token'}),
+        headers: {'Content-Type': 'application/json'},
+      );
+    } catch (e) {
+      return Response(
+        500,
+        body: jsonEncode({'error': 'Failed to verify Firebase token: $e'}),
         headers: {'Content-Type': 'application/json'},
       );
     }

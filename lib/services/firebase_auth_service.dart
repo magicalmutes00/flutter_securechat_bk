@@ -55,7 +55,7 @@ class FirebaseAuthService {
     try {
       jwt = JWT.verify(
         idToken,
-        RSAPublicKey(certPem),
+        RSAPublicKey.cert(certPem),
         // Firebase issues tokens with these standard claims
         checkHeaderType: false,
       );

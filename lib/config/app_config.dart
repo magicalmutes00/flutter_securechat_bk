@@ -11,7 +11,7 @@ class AppConfig {
   static int get serverPort =>
       int.tryParse(EnvConfig.get('SERVER_PORT') ?? '8080') ?? 8080;
   static String get serverBaseUrl =>
-      EnvConfig.get('SERVER_BASE_URL') ?? 'http://localhost:8080';
+      EnvConfig.get('SERVER_BASE_URL') ?? 'http://192.168.1.14:8081';
 
   // WebSocket Configuration
   static String get wsPath => EnvConfig.get('WS_PATH') ?? '/ws';
@@ -88,8 +88,11 @@ class AppConfig {
     return [
       'http://localhost:3000',
       'http://localhost:8080',
+      'http://localhost:8081',
       'http://127.0.0.1:3000',
       'http://127.0.0.1:8080',
+      'http://127.0.0.1:8081',
+      'http://192.168.1.14:8081',
     ];
   }
 

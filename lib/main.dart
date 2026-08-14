@@ -23,7 +23,7 @@ import 'middleware/auth_middleware.dart';
 import 'middleware/rate_limit_middleware.dart';
 
 void main() async {
-  await EnvConfig.load();
+  await EnvConfig.load(path: _resolveEnvPath());
 
   await DatabaseService().initialize();
   print('Database initialized');
@@ -59,6 +59,22 @@ void main() async {
       'Server running on ws://${server.address.host}:${server.port}',
     );
   }
+}
+
+/// Resolves the path to the `.env` file regardless of the working directory the
+/// process is launched from (IDE run configs often use the repo root).
+String _resolveEnvPath() {
+  try {
+    final script = File.fromUri(Platform.script);
+    // main.dart lives at <project>/lib/main.dart; .env sits at <project>/.env
+    final envFile = File(
+      '${script.parent.parent.path}${Platform.pathSeparator}.env',
+    );
+    if (envFile.existsSync()) return envFile.path;
+  } catch (_) {
+    // Fall back to the working directory below.
+  }
+  return '.env';
 }
 
 Middleware _corsMiddleware() {
