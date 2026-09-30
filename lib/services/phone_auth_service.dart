@@ -6,6 +6,15 @@ class PhoneAuthService {
   final UserService _userService = UserService();
   final JwtService _jwtService = JwtService();
 
+  /// Registers the new refresh token's jti so previously issued refresh
+  /// tokens for this user stop working (single active refresh session).
+  Future<void> _storeRefreshJti(String userId, String refreshToken) async {
+    final jti = _jwtService.getJwtId(refreshToken);
+    if (jti != null) {
+      await _userService.setCurrentRefreshJti(userId, jti);
+    }
+  }
+
   /// Register a new user with phone and password
   Future<Map<String, dynamic>> registerWithPhone({
     required String phone,
@@ -34,12 +43,13 @@ class PhoneAuthService {
 
       // Generate tokens
       final accessToken = _jwtService.generateAccessToken(
-        user.id.toHexString(),
+        user.id,
         user.phone,
         email: user.email,
       );
       final refreshToken =
-          _jwtService.generateRefreshToken(user.id.toHexString());
+          _jwtService.generateRefreshToken(user.id);
+      await _storeRefreshJti(user.id, refreshToken);
 
       return {
         'success': true,
@@ -78,12 +88,13 @@ class PhoneAuthService {
 
       // Generate tokens
       final accessToken = _jwtService.generateAccessToken(
-        user.id.toHexString(),
+        user.id,
         user.phone,
         email: user.email,
       );
       final refreshToken =
-          _jwtService.generateRefreshToken(user.id.toHexString());
+          _jwtService.generateRefreshToken(user.id);
+      await _storeRefreshJti(user.id, refreshToken);
 
       return {
         'success': true,

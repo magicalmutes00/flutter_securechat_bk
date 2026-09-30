@@ -20,15 +20,11 @@ class AppConfig {
   static int get wsConnectionTimeoutSeconds =>
       int.tryParse(EnvConfig.get('WS_CONNECTION_TIMEOUT') ?? '60') ?? 60;
 
-  // MongoDB Configuration
-  static String get mongoHost => EnvConfig.get('MONGO_HOST') ?? 'localhost';
-  static int get mongoPort =>
-      int.tryParse(EnvConfig.get('MONGO_PORT') ?? '27017') ?? 27017;
-  static String get mongoDatabase =>
-      EnvConfig.get('MONGO_DATABASE') ?? 'securechat';
-  static String get mongoConnectionString =>
-      EnvConfig.get('MONGO_CONNECTION_STRING') ??
-      'mongodb://localhost:27017/securechat';
+  // Supabase (PostgreSQL) Configuration (REQUIRED)
+  // Connection string from Supabase → Project Settings → Database.
+  // Use the session pooler URI (port 5432), e.g.
+  // postgresql://postgres.<ref>:<password>@aws-0-<region>.pooler.supabase.com:5432/postgres
+  static String get supabaseDbUrl => EnvConfig.getRequired('SUPABASE_DB_URL');
 
   // JWT Configuration (REQUIRED - must be set via environment)
   static String get jwtSecret => EnvConfig.getRequired('JWT_SECRET');
@@ -43,14 +39,14 @@ class AppConfig {
       30;
   static String get jwtAlgorithm => EnvConfig.get('JWT_ALGORITHM') ?? 'HS256';
 
-  // OTP Configuration (MessageCentral API - REQUIRED)
+  // OTP Configuration (MessageCentral API — legacy fallback flow)
   static String get messageCentralBaseUrl =>
       EnvConfig.get('MESSAGE_CENTRAL_BASE_URL') ??
       'https://api.messagecentral.com';
-  static String get messageCentralApiKey =>
-      EnvConfig.getRequired('MESSAGE_CENTRAL_API_KEY');
-  static String get messageCentralCustomerId =>
-      EnvConfig.getRequired('MESSAGE_CENTRAL_CUSTOMER_ID');
+  static String? get messageCentralApiKey =>
+      EnvConfig.get('MESSAGE_CENTRAL_API_KEY');
+  static String? get messageCentralCustomerId =>
+      EnvConfig.get('MESSAGE_CENTRAL_CUSTOMER_ID');
   static int get otpLength =>
       int.tryParse(EnvConfig.get('OTP_LENGTH') ?? '6') ?? 6;
   static int get otpExpiryMinutes =>
@@ -59,24 +55,34 @@ class AppConfig {
       int.tryParse(EnvConfig.get('OTP_MAX_ATTEMPTS') ?? '3') ?? 3;
   static bool get otpDevMode => EnvConfig.get('OTP_DEV_MODE') == 'true';
 
-  // File Upload Configuration
-  static String get uploadDirectory =>
-      EnvConfig.get('UPLOAD_DIRECTORY') ?? 'uploads';
-  static Map<String, String> get uploadFolders => {
-        'image': EnvConfig.get('UPLOAD_FOLDER_IMAGES') ?? 'uploads/images',
-        'video': EnvConfig.get('UPLOAD_FOLDER_VIDEOS') ?? 'uploads/videos',
-        'audio': EnvConfig.get('UPLOAD_FOLDER_AUDIO') ?? 'uploads/audio',
-        'document': EnvConfig.get('UPLOAD_FOLDER_DOCS') ?? 'uploads/docs',
-      };
+  // Cloudinary Configuration (REQUIRED — all attachments are stored there)
+  static String get cloudinaryCloudName =>
+      EnvConfig.getRequired('CLOUDINARY_CLOUD_NAME');
+  static String get cloudinaryApiKey =>
+      EnvConfig.getRequired('CLOUDINARY_API_KEY');
+  static String get cloudinaryApiSecret =>
+      EnvConfig.getRequired('CLOUDINARY_API_SECRET');
 
   static int get maxFileSizeBytes =>
       int.tryParse(EnvConfig.get('MAX_FILE_SIZE_BYTES') ?? '52428800') ??
       52428800;
   static Map<String, List<String>> get allowedFileExtensions => {
-        'image': ['jpg', 'jpeg', 'png', 'gif', 'webp'],
-        'video': ['mp4', 'mov', 'avi', 'mkv', 'webm'],
-        'audio': ['mp3', 'wav', 'aac', 'm4a', 'ogg'],
-        'document': ['pdf', 'doc', 'docx', 'txt', 'xls', 'xlsx', 'ppt', 'pptx'],
+        // 'enc' covers end-to-end encrypted attachments whose original
+        // extension was lost; their content is opaque ciphertext.
+        'image': ['jpg', 'jpeg', 'png', 'gif', 'webp', 'enc'],
+        'video': ['mp4', 'mov', 'avi', 'mkv', 'webm', 'enc'],
+        'audio': ['mp3', 'wav', 'aac', 'm4a', 'ogg', 'enc'],
+        'document': [
+          'pdf',
+          'doc',
+          'docx',
+          'txt',
+          'xls',
+          'xlsx',
+          'ppt',
+          'pptx',
+          'enc'
+        ],
       };
 
   // CORS Configuration
@@ -101,6 +107,12 @@ class AppConfig {
       int.tryParse(EnvConfig.get('RATE_LIMIT_MAX_REQUESTS') ?? '100') ?? 100;
   static int get rateLimitWindowMinutes =>
       int.tryParse(EnvConfig.get('RATE_LIMIT_WINDOW_MINUTES') ?? '1') ?? 1;
+
+  /// Set to true when running behind a reverse proxy (ngrok, nginx, a cloud
+  /// LB) so the rate limiter keys on the client's `X-Forwarded-For` address
+  /// instead of the proxy's — otherwise every client shares one bucket.
+  static bool get rateLimitTrustProxy =>
+      EnvConfig.get('RATE_LIMIT_TRUST_PROXY') == 'true';
 
   // Message Status Types
   static String get messageStatusSent => 'sent';
@@ -136,6 +148,13 @@ class AppConfig {
   static String get fcmEndpoint =>
       EnvConfig.get('FCM_ENDPOINT') ?? 'https://fcm.googleapis.com/fcm/send';
   static String? get fcmServerKey => EnvConfig.get('FCM_SERVER_KEY');
+
+  // Firebase Authentication
+  // Project ID bound to Firebase ID tokens: tokens whose audience/issuer do
+  // not match are rejected (Google signs tokens for ALL Firebase projects
+  // with the same keys, so the signature alone proves nothing).
+  static String get firebaseProjectId =>
+      EnvConfig.getRequired('FIREBASE_PROJECT_ID');
 
   // TLS
   static String? get tlsCertPath => EnvConfig.get('TLS_CERT_PATH');

@@ -1,10 +1,21 @@
-import 'package:dart_jsonwebtoken/dart_jsonwebtoken.dart';
-import 'package:crypto/crypto.dart';
 import 'dart:convert';
+import 'dart:math';
+
+import 'package:dart_jsonwebtoken/dart_jsonwebtoken.dart';
 import '../config/app_config.dart';
 
 class JwtService {
   final _secret = SecretKey(AppConfig.jwtSecret);
+
+  final Random _random = Random.secure();
+
+  /// A random unique token id. Without it, two tokens minted for the same
+  /// user within the same second are byte-identical, which makes refresh
+  /// rotation a no-op.
+  String _newJwtId() {
+    final bytes = List<int>.generate(16, (_) => _random.nextInt(256));
+    return base64Url.encode(bytes);
+  }
 
   String generateAccessToken(String userId, String? phone, {String? email}) {
     final now = DateTime.now();
@@ -17,6 +28,7 @@ class JwtService {
       'exp': expiry.millisecondsSinceEpoch ~/ 1000,
       'iss': AppConfig.jwtIssuer,
       'type': 'access',
+      'jti': _newJwtId(),
     };
 
     // Only add optional fields if they are present
@@ -39,6 +51,7 @@ class JwtService {
         'exp': expiry.millisecondsSinceEpoch ~/ 1000,
         'iss': AppConfig.jwtIssuer,
         'type': 'refresh',
+        'jti': _newJwtId(),
       },
     );
 
@@ -63,9 +76,10 @@ class JwtService {
       }
 
       final userId = payload['sub'] as String;
-      final phone = payload['phone'] as String?;
-      final email = payload['email'] as String?;
-      final newAccessToken = generateAccessToken(userId, phone, email: email);
+
+      // Refresh tokens do not carry phone/email claims; the new access token
+      // is issued without them (they are optional and unused for routing).
+      final newAccessToken = generateAccessToken(userId, null);
       final newRefreshToken = generateRefreshToken(userId);
 
       return {
@@ -83,13 +97,9 @@ class JwtService {
     return payload?['sub'] as String?;
   }
 
-  String hashPassword(String password) {
-    final bytes = utf8.encode(password);
-    final digest = sha256.convert(bytes);
-    return digest.toString();
-  }
-
-  bool verifyPassword(String password, String hash) {
-    return hashPassword(password) == hash;
+  /// The jti (unique id) of a verified token, or null when invalid.
+  String? getJwtId(String token) {
+    final payload = verifyToken(token);
+    return payload?['jti'] as String?;
   }
 }

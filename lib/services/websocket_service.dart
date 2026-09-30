@@ -1,9 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:web_socket_channel/web_socket_channel.dart';
-import 'package:mongo_dart/mongo_dart.dart';
-import '../config/app_config.dart';
 import '../models/message_model.dart';
+import '../utils/validate.dart';
 import 'group_service.dart';
 import 'message_service.dart';
 import 'push_service.dart';
@@ -19,13 +18,13 @@ class WebSocketService {
   final PushService _pushService = PushService();
 
   void handleConnection(WebSocketChannel channel, String userId) {
-    final connectionId = DateTime.now().millisecondsSinceEpoch.toString();
+    final connectionId = '${DateTime.now().microsecondsSinceEpoch}_$userId';
     _connections[connectionId] = channel;
     _connectionUsers[connectionId] = userId;
     _connectionAuthenticated[connectionId] =
         true; // Auth already verified in main.dart via token
 
-    _userService.updateOnlineStatus(ObjectId.fromHexString(userId), true);
+    unawaited(_userService.updateOnlineStatus(userId, true));
 
     channel.stream.listen(
       (message) => _handleMessage(connectionId, message),
@@ -33,7 +32,7 @@ class WebSocketService {
       onError: (error) => _handleDisconnect(connectionId),
     );
 
-    _broadcastUserStatus(userId, true);
+    unawaited(_broadcastUserStatus(userId, true));
   }
 
   void _handleMessage(String connectionId, dynamic message) {
@@ -106,7 +105,8 @@ class WebSocketService {
 
     try {
       final senderId = authenticatedUserId;
-      final receiverId = data['receiver_id'] as String;
+      final receiverId = data['receiver_id'] as String?;
+      if (receiverId == null || !isValidUuid(receiverId)) return;
       final messageType = data['message_type'] as String? ?? 'text';
       final content = data['content'] as String? ?? '';
       final fileUrl = data['file_url'] as String?;
@@ -122,8 +122,8 @@ class WebSocketService {
       }
 
       final message = await _messageService.sendMessage(
-        senderId: ObjectId.fromHexString(senderId),
-        receiverId: ObjectId.fromHexString(receiverId),
+        senderId: senderId,
+        receiverId: receiverId,
         messageType: messageType,
         content: content,
         filePath: fileUrl,
@@ -162,22 +162,20 @@ class WebSocketService {
     MessageModel message,
   ) async {
     try {
-      final sender = await _userService.findUserById(
-        ObjectId.fromHexString(senderId),
-      );
+      final sender = await _userService.findUserById(senderId);
       final senderName = sender?.displayName ?? 'Someone';
 
       final body = message.messageType == 'text'
-          ? message.content
+          ? 'Sent you a message'
           : _messageTypeLabel(message.messageType);
 
       await _pushService.sendToUser(
-        userId: ObjectId.fromHexString(receiverId),
+        userId: receiverId,
         title: senderName,
         body: body,
         data: {
           'sender_id': senderId,
-          'message_id': message.id.toHexString(),
+          'message_id': message.id,
           'type': 'message',
         },
       );
@@ -209,15 +207,15 @@ class WebSocketService {
 
     try {
       final senderId = authenticatedUserId;
-      final groupId = data['group_id'] as String;
-      final group =
-          await _groupService.getGroupById(ObjectId.fromHexString(groupId));
+      final groupId = data['group_id'] as String?;
+      if (groupId == null || !isValidUuid(groupId)) return;
+      final group = await _groupService.getGroupById(groupId);
       if (group == null) return;
-      if (!group.isMember(ObjectId.fromHexString(senderId))) return;
+      if (!group.isMember(senderId)) return;
 
       final message = await _groupService.sendGroupMessage(
         groupId: group.id,
-        senderId: ObjectId.fromHexString(senderId),
+        senderId: senderId,
         messageType: data['message_type'] as String? ?? 'text',
         content: data['content'] as String? ?? '',
         filePath: data['file_url'] as String?,
@@ -231,9 +229,8 @@ class WebSocketService {
 
       final messageData = message.toJson();
       for (final memberId in group.memberIds) {
-        final memberStr = memberId.toHexString();
-        if (memberStr == senderId) continue;
-        _sendToUser(memberStr, {
+        if (memberId == senderId) continue;
+        _sendToUser(memberId, {
           'type': 'group_message',
           'data': messageData,
         });
@@ -245,24 +242,23 @@ class WebSocketService {
       });
 
       // Notify offline group members.
-      final sender = await _userService.findUserById(
-        ObjectId.fromHexString(senderId),
-      );
+      final sender = await _userService.findUserById(senderId);
       final senderName = sender?.displayName ?? 'Someone';
+      // Never include message content in push bodies — the FCM channel is
+      // not end-to-end encrypted.
       final body = message.messageType == 'text'
-          ? message.content
+          ? 'Sent you a message'
           : _messageTypeLabel(message.messageType);
       for (final memberId in group.memberIds) {
-        final memberStr = memberId.toHexString();
-        if (memberStr == senderId) continue;
-        if (isUserConnected(memberStr)) continue;
+        if (memberId == senderId) continue;
+        if (isUserConnected(memberId)) continue;
         unawaited(_pushService.sendToUser(
           userId: memberId,
           title: senderName,
           body: body,
           data: {
-            'group_id': group.id.toHexString(),
-            'message_id': message.id.toHexString(),
+            'group_id': group.id,
+            'message_id': message.id,
             'type': 'group_message',
           },
         ));
@@ -277,15 +273,16 @@ class WebSocketService {
     required String? authenticatedUserId,
   }) async {
     if (authenticatedUserId == null) return;
-    final groupId = data['group_id'] as String;
-    final group =
-        await _groupService.getGroupById(ObjectId.fromHexString(groupId));
+    final groupId = data['group_id'] as String?;
+    if (groupId == null || !isValidUuid(groupId)) return;
+    final group = await _groupService.getGroupById(groupId);
     if (group == null) return;
+    // Only members may trigger typing events for a group.
+    if (!group.isMember(authenticatedUserId)) return;
 
     for (final memberId in group.memberIds) {
-      final memberStr = memberId.toHexString();
-      if (memberStr == authenticatedUserId) continue;
-      _sendToUser(memberStr, {
+      if (memberId == authenticatedUserId) continue;
+      _sendToUser(memberId, {
         'type': 'group_typing',
         'group_id': groupId,
         'sender_id': authenticatedUserId,
@@ -299,7 +296,8 @@ class WebSocketService {
     required String? authenticatedUserId,
   }) {
     if (authenticatedUserId == null) return;
-    final receiverId = data['receiver_id'] as String;
+    final receiverId = data['receiver_id'] as String?;
+    if (receiverId == null || !isValidUuid(receiverId)) return;
     _sendToUser(receiverId, {
       'type': 'typing',
       'sender_id': authenticatedUserId,
@@ -318,7 +316,7 @@ class WebSocketService {
   }) {
     if (authenticatedUserId == null) return;
     final peerId = data['receiver_id'] as String?;
-    if (peerId == null) return;
+    if (peerId == null || !isValidUuid(peerId)) return;
 
     final payload = Map<String, dynamic>.from(data)
       ..['sender_id'] = authenticatedUserId;
@@ -334,13 +332,11 @@ class WebSocketService {
   }) async {
     if (readerUserId == null) return;
 
-    final senderId = data['sender_id'] as String;
+    final senderId = data['sender_id'] as String?;
+    if (senderId == null || !isValidUuid(senderId)) return;
     if (senderId == readerUserId) return;
 
-    await _messageService.markMessagesAsRead(
-      ObjectId.fromHexString(senderId),
-      ObjectId.fromHexString(readerUserId),
-    );
+    await _messageService.markMessagesAsRead(senderId, readerUserId);
 
     _sendToUser(senderId, {
       'type': 'read_receipt',
@@ -355,12 +351,21 @@ class WebSocketService {
     if (receiverUserId == null) return;
 
     final senderId = data['sender_id'] as String?;
-    if (senderId == null) return;
+    final messageId = data['message_id'] as String?;
+    if (senderId == null ||
+        messageId == null ||
+        !isValidUuid(senderId) ||
+        !isValidUuid(messageId)) {
+      return;
+    }
 
-    await _messageService.updateMessageStatus(
-      ObjectId.fromHexString(data['message_id'] as String),
-      AppConfig.messageStatusDelivered,
+    // Only the message's actual receiver may mark it delivered; otherwise any
+    // authenticated user could flip the status of any message by id.
+    final delivered = await _messageService.markDelivered(
+      messageId,
+      receiverUserId,
     );
+    if (!delivered) return;
 
     _sendToUser(senderId, {
       'type': 'delivery_receipt',
@@ -371,8 +376,8 @@ class WebSocketService {
   void _handleDisconnect(String connectionId) {
     final userId = _connectionUsers[connectionId];
     if (userId != null) {
-      _userService.updateOnlineStatus(ObjectId.fromHexString(userId), false);
-      _broadcastUserStatus(userId, false);
+      unawaited(_userService.updateOnlineStatus(userId, false));
+      unawaited(_broadcastUserStatus(userId, false));
       _connectionUsers.remove(connectionId);
     }
     _connections.remove(connectionId);
@@ -387,22 +392,27 @@ class WebSocketService {
     }
   }
 
-  void _broadcastUserStatus(String userId, bool isOnline) {
+  /// Broadcasts online/offline presence only to users who share a
+  /// conversation with [userId] — presence of strangers is nobody's business.
+  Future<void> _broadcastUserStatus(String userId, bool isOnline) async {
     final statusMessage = jsonEncode({
       'type': 'user_status',
       'user_id': userId,
       'is_online': isOnline,
     });
 
-    for (final channel in _connections.values) {
-      channel.sink.add(statusMessage);
+    final Set<String> audience;
+    try {
+      audience = await _messageService.getConversationPartnerIds(userId);
+    } catch (_) {
+      return; // Presence is best-effort; never break the connection path.
     }
-  }
 
-  void broadcastMessage(Map<String, dynamic> message) {
-    final encoded = jsonEncode(message);
-    for (final channel in _connections.values) {
-      channel.sink.add(encoded);
+    for (final entry in _connectionUsers.entries) {
+      if (entry.value != userId && audience.contains(entry.value)) {
+        final channel = _connections[entry.key];
+        channel?.sink.add(statusMessage);
+      }
     }
   }
 

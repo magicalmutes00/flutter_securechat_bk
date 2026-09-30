@@ -1,11 +1,8 @@
-import 'package:mongo_dart/mongo_dart.dart';
-
-/// Message model for MongoDB
-/// Represents a chat message in SecureChat
+/// Message model backed by the Supabase `messages` table.
 class MessageModel {
-  final ObjectId id;
-  final ObjectId senderId;
-  final ObjectId receiverId;
+  final String id; // UUID
+  final String senderId;
+  final String receiverId;
   final String messageType;
   final String content;
   final String? filePath;
@@ -42,49 +39,29 @@ class MessageModel {
 
   factory MessageModel.fromMap(Map<String, dynamic> map) {
     return MessageModel(
-      id: map['_id'] as ObjectId,
-      senderId: map['sender_id'] as ObjectId,
-      receiverId: map['receiver_id'] as ObjectId,
+      id: map['id'] as String,
+      senderId: map['sender_id'] as String,
+      receiverId: map['receiver_id'] as String,
       messageType: map['message_type'] as String,
       content: map['content'] as String? ?? '',
       filePath: map['file_path'] as String?,
       fileName: map['file_name'] as String?,
-      fileSize: map['file_size'] as int?,
+      fileSize: (map['file_size'] as num?)?.toInt(),
       mediaType: map['media_type'] as String?,
       status: map['status'] as String,
-      createdAt: map['created_at'] as DateTime,
-      updatedAt: map['updated_at'] as DateTime,
+      createdAt: (map['created_at'] as DateTime).toUtc(),
+      updatedAt: (map['updated_at'] as DateTime).toUtc(),
       encryption: map['encryption'] as String? ?? 'none',
-      cipherType: map['cipher_type'] as int?,
+      cipherType: (map['cipher_type'] as num?)?.toInt(),
       cipherBody: map['cipher_body'] as String?,
     );
   }
 
-  Map<String, dynamic> toMap() {
-    return {
-      '_id': id,
-      'sender_id': senderId,
-      'receiver_id': receiverId,
-      'message_type': messageType,
-      'content': content,
-      'file_path': filePath,
-      'file_name': fileName,
-      'file_size': fileSize,
-      'media_type': mediaType,
-      'status': status,
-      'created_at': createdAt,
-      'updated_at': updatedAt,
-      'encryption': encryption,
-      'cipher_type': cipherType,
-      'cipher_body': cipherBody,
-    };
-  }
-
   Map<String, dynamic> toJson() {
     return {
-      'id': id.toHexString(),
-      'sender_id': senderId.toHexString(),
-      'receiver_id': receiverId.toHexString(),
+      'id': id,
+      'sender_id': senderId,
+      'receiver_id': receiverId,
       'message_type': messageType,
       'content': content,
       'file_path': filePath,
@@ -101,9 +78,9 @@ class MessageModel {
   }
 
   MessageModel copyWith({
-    ObjectId? id,
-    ObjectId? senderId,
-    ObjectId? receiverId,
+    String? id,
+    String? senderId,
+    String? receiverId,
     String? messageType,
     String? content,
     String? filePath,

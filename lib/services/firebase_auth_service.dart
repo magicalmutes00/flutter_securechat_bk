@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:dart_jsonwebtoken/dart_jsonwebtoken.dart';
 import 'package:http/http.dart' as http;
+import '../config/app_config.dart';
 import 'user_service.dart';
 import 'jwt_service.dart';
 
@@ -18,6 +19,12 @@ class FirebaseAuthService {
   // Google's public key endpoint for Firebase tokens
   static const _certsUrl =
       'https://www.googleapis.com/robot/v1/metadata/x509/securetoken@system.gserviceaccount.com';
+
+  // Google's public certs are rotated rarely and served with a Cache-Control
+  // max-age; caching avoids a network round trip on every login.
+  static Map<String, dynamic>? _cachedCerts;
+  static DateTime _certsFetchedAt = DateTime.fromMillisecondsSinceEpoch(0);
+  static Duration _certsCacheTtl = const Duration(hours: 1);
 
   /// Verifies the [idToken] and returns an auth result map containing the
   /// access+refresh token pair and the user object.
@@ -39,12 +46,8 @@ class FirebaseAuthService {
       throw FirebaseAuthException('Token header missing kid');
     }
 
-    // 2. Fetch Google's public certs
-    final certsResponse = await http.get(Uri.parse(_certsUrl));
-    if (certsResponse.statusCode != 200) {
-      throw FirebaseAuthException('Could not fetch Google public keys');
-    }
-    final certs = jsonDecode(certsResponse.body) as Map<String, dynamic>;
+    // 2. Fetch Google's public certs (cached)
+    final certs = await _fetchPublicCerts();
     final certPem = certs[kid] as String?;
     if (certPem == null) {
       throw FirebaseAuthException('No matching key found for kid: $kid');
@@ -66,6 +69,19 @@ class FirebaseAuthService {
     }
 
     final payload = jwt.payload as Map<String, dynamic>;
+
+    // Google signs Firebase tokens for every project with the same keys, so
+    // the signature only proves it is a Firebase token. The audience and
+    // issuer must be checked to bind the token to THIS Firebase project.
+    final projectId = AppConfig.firebaseProjectId;
+    if (payload['aud'] != projectId) {
+      throw FirebaseAuthException(
+          'Firebase token audience does not match this project');
+    }
+    if (payload['iss'] != 'https://securetoken.google.com/$projectId') {
+      throw FirebaseAuthException(
+          'Firebase token issuer does not match this project');
+    }
 
     // 4. Extract user identifiers from the token
     // Firebase UID is always present in Firebase tokens (as 'sub' or 'user_id')
@@ -91,10 +107,14 @@ class FirebaseAuthService {
       displayName: displayName,
     );
     final accessToken = _jwtService.generateAccessToken(
-        user.id.toHexString(), user.phone,
+        user.id, user.phone,
         email: user.email);
-    final refreshToken =
-        _jwtService.generateRefreshToken(user.id.toHexString());
+    final refreshToken = _jwtService.generateRefreshToken(user.id);
+    // Single active refresh session: minting a new pair revokes the old one.
+    final jti = _jwtService.getJwtId(refreshToken);
+    if (jti != null) {
+      await _userService.setCurrentRefreshJti(user.id, jti);
+    }
 
     return {
       'success': true,
@@ -103,6 +123,31 @@ class FirebaseAuthService {
       'access_token': accessToken,
       'refresh_token': refreshToken,
     };
+  }
+
+  Future<Map<String, dynamic>> _fetchPublicCerts() async {
+    final cached = _cachedCerts;
+    if (cached != null &&
+        DateTime.now().difference(_certsFetchedAt) < _certsCacheTtl) {
+      return cached;
+    }
+
+    final certsResponse = await http.get(Uri.parse(_certsUrl));
+    if (certsResponse.statusCode != 200) {
+      throw FirebaseAuthException('Could not fetch Google public keys');
+    }
+    final certs = jsonDecode(certsResponse.body) as Map<String, dynamic>;
+
+    // Respect Google's cache lifetime when advertised.
+    final cacheControl = certsResponse.headers['cache-control'] ?? '';
+    final maxAge = RegExp(r'max-age=(\d+)').firstMatch(cacheControl)?.group(1);
+    if (maxAge != null) {
+      _certsCacheTtl = Duration(seconds: int.parse(maxAge));
+    }
+
+    _certsFetchedAt = DateTime.now();
+    _cachedCerts = certs;
+    return certs;
   }
 }
 

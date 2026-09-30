@@ -1,7 +1,7 @@
 import 'dart:convert';
 
 import 'package:crypto/crypto.dart';
-import 'package:mongo_dart/mongo_dart.dart';
+
 import '../models/user_model.dart';
 import 'database_service.dart';
 
@@ -9,62 +9,63 @@ class UserService {
   final DatabaseService _db = DatabaseService();
 
   Future<UserModel?> findUserByPhone(String phone) async {
-    final userData = await _db.users.findOne({'phone': phone});
-    if (userData == null) return null;
-    return UserModel.fromMap(userData);
+    final row = await _db
+        .queryOne('SELECT * FROM users WHERE phone = @phone', parameters: {
+      'phone': phone,
+    });
+    if (row == null) return null;
+    return UserModel.fromMap(row);
   }
 
   /// Find user by phone number with password
   Future<UserModel?> findUserByPhoneWithPassword(String phone) async {
-    final userData = await _db.users.findOne({
-      'phone': phone,
-      'password_hash': {'\$exists': true, '\$ne': null},
-    });
-    if (userData == null) return null;
-    return UserModel.fromMap(userData);
+    final row = await _db.queryOne(
+      'SELECT * FROM users WHERE phone = @phone AND password_hash IS NOT NULL',
+      parameters: {'phone': phone},
+    );
+    if (row == null) return null;
+    return UserModel.fromMap(row);
   }
 
-  /// Find user by email
+  /// Find user by email (case-insensitive)
   Future<UserModel?> findUserByEmail(String email) async {
-    // Try exact match first
-    var userData = await _db.users.findOne({'email': email});
-    if (userData == null) {
-      // Try case-insensitive search
-      userData = await _db.users.findOne({
-        'email': RegExp(email, caseSensitive: false),
-      });
-    }
-    if (userData == null) return null;
-    return UserModel.fromMap(userData);
+    final row = await _db.queryOne(
+      'SELECT * FROM users WHERE lower(email) = lower(@email)',
+      parameters: {'email': email},
+    );
+    if (row == null) return null;
+    return UserModel.fromMap(row);
   }
 
   /// Find user by Firebase UID
   Future<UserModel?> findUserByFirebaseUid(String firebaseUid) async {
-    final userData = await _db.users.findOne({'firebase_uid': firebaseUid});
-    if (userData == null) return null;
-    return UserModel.fromMap(userData);
+    final row = await _db.queryOne(
+      'SELECT * FROM users WHERE firebase_uid = @uid',
+      parameters: {'uid': firebaseUid},
+    );
+    if (row == null) return null;
+    return UserModel.fromMap(row);
   }
 
-  Future<UserModel?> findUserById(ObjectId id) async {
-    final userData = await _db.users.findOne({'_id': id});
-    if (userData == null) return null;
-    return UserModel.fromMap(userData);
+  Future<UserModel?> findUserById(String id) async {
+    final row = await _db.queryOne(
+      'SELECT * FROM users WHERE id = @id:uuid',
+      parameters: {'id': id},
+    );
+    if (row == null) return null;
+    return UserModel.fromMap(row);
   }
 
   Future<UserModel> createUser(String phone,
       {String? username, String? displayName}) async {
-    final now = DateTime.now();
-    final user = UserModel(
-      id: ObjectId(),
-      phone: phone,
-      username: username,
-      displayName: displayName ?? phone,
-      phoneHash: _hashPhone(phone),
-      createdAt: now,
-      updatedAt: now,
+    return _insertUser(
+      columns: 'phone, display_name, phone_hash',
+      parameters: {
+        'phone': phone,
+        'display_name': displayName ?? phone,
+        'phone_hash': _hashPhone(phone),
+      },
     );
-    await _db.users.insertOne(user.toMap());
-    return user;
   }
 
   /// Create a new user with email/password authentication
@@ -73,17 +74,14 @@ class UserService {
     required String passwordHash,
     String? displayName,
   }) async {
-    final now = DateTime.now();
-    final user = UserModel(
-      id: ObjectId(),
-      email: email,
-      passwordHash: passwordHash,
-      displayName: displayName ?? email.split('@').first,
-      createdAt: now,
-      updatedAt: now,
+    return _insertUser(
+      columns: 'email, password_hash, display_name',
+      parameters: {
+        'email': email,
+        'password_hash': passwordHash,
+        'display_name': displayName ?? email.split('@').first,
+      },
     );
-    await _db.users.insertOne(user.toMap());
-    return user;
   }
 
   /// Create a new user with phone/password authentication
@@ -92,18 +90,15 @@ class UserService {
     required String passwordHash,
     String? displayName,
   }) async {
-    final now = DateTime.now();
-    final user = UserModel(
-      id: ObjectId(),
-      phone: phone,
-      passwordHash: passwordHash,
-      displayName: displayName ?? phone,
-      phoneHash: _hashPhone(phone),
-      createdAt: now,
-      updatedAt: now,
+    return _insertUser(
+      columns: 'phone, password_hash, display_name, phone_hash',
+      parameters: {
+        'phone': phone,
+        'password_hash': passwordHash,
+        'display_name': displayName ?? phone,
+        'phone_hash': _hashPhone(phone),
+      },
     );
-    await _db.users.insertOne(user.toMap());
-    return user;
   }
 
   /// Create a new user with full Firebase auth support
@@ -113,19 +108,34 @@ class UserService {
     String? email,
     String? displayName,
   }) async {
-    final now = DateTime.now();
-    final user = UserModel(
-      id: ObjectId(),
-      firebaseUid: firebaseUid,
-      phone: phone,
-      email: email,
-      displayName:
-          displayName ?? (email != null ? email.split('@').first : null),
-      createdAt: now,
-      updatedAt: now,
+    return _insertUser(
+      columns: 'firebase_uid, phone, email, display_name',
+      parameters: {
+        'firebase_uid': firebaseUid,
+        'phone': phone,
+        'email': email,
+        'display_name':
+            displayName ?? (email != null ? email.split('@').first : null),
+      },
     );
-    await _db.users.insertOne(user.toMap());
-    return user;
+  }
+
+  Future<UserModel> _insertUser({
+    required String columns,
+    required Map<String, Object?> parameters,
+  }) async {
+    final row = await _db.queryOne(
+      'INSERT INTO users ($columns) VALUES (${_placeholders(columns)}) RETURNING *',
+      parameters: parameters,
+    );
+    return UserModel.fromMap(row!);
+  }
+
+  static String _placeholders(String columns) {
+    return columns
+        .split(',')
+        .map((c) => '@${c.trim()}')
+        .join(', ');
   }
 
   /// Get or create user based on Firebase authentication
@@ -171,128 +181,159 @@ class UserService {
   /// Update user with new information if available
   Future<UserModel> _updateUserIfNeeded(UserModel user,
       {String? phone, String? email, String? displayName}) async {
-    bool needsUpdate = false;
-    final updates = <String, dynamic>{};
+    final sets = <String>['updated_at = now()'];
+    final parameters = <String, Object?>{'id': user.id};
 
     if (user.phone == null && phone != null) {
-      updates['phone'] = phone;
-      needsUpdate = true;
+      sets.add('phone = @phone');
+      parameters['phone'] = phone;
     }
-
     if (user.email == null && email != null) {
-      updates['email'] = email;
-      needsUpdate = true;
+      sets.add('email = @email');
+      parameters['email'] = email;
     }
-
     if (user.displayName == null && displayName != null) {
-      updates['display_name'] = displayName;
-      needsUpdate = true;
+      sets.add('display_name = @display_name');
+      parameters['display_name'] = displayName;
     }
 
-    if (needsUpdate) {
-      updates['updated_at'] = DateTime.now();
-      var modifier = modify.set('updated_at', updates['updated_at']);
-      if (updates.containsKey('phone'))
-        modifier = modifier.set('phone', updates['phone']);
-      if (updates.containsKey('email'))
-        modifier = modifier.set('email', updates['email']);
-      if (updates.containsKey('display_name'))
-        modifier = modifier.set('display_name', updates['display_name']);
-      await _db.users.updateOne(
-        where.eq('_id', user.id),
-        modifier,
-      );
-      return (await findUserById(user.id))!;
-    }
+    if (sets.length == 1) return user;
 
-    return user;
+    await _db.execute(
+      'UPDATE users SET ${sets.join(', ')} WHERE id = @id:uuid',
+      parameters: parameters,
+    );
+    return (await findUserById(user.id))!;
   }
 
   /// Link an existing user to a Firebase UID
   Future<UserModel> _linkFirebaseUidToUser(
-      ObjectId userId, String firebaseUid) async {
-    await _db.users.updateOne(
-      where.eq('_id', userId),
-      modify.set('firebase_uid', firebaseUid).set('updated_at', DateTime.now()),
+      String userId, String firebaseUid) async {
+    await _db.execute(
+      'UPDATE users SET firebase_uid = @uid, updated_at = now() WHERE id = @id:uuid',
+      parameters: {'uid': firebaseUid, 'id': userId},
     );
     return (await findUserById(userId))!;
   }
 
-  /// Legacy method - maintained for backward compatibility
-  Future<UserModel> getOrCreateUser(String phone) async {
-    var user = await findUserByPhone(phone);
-    if (user == null) {
-      user = await createUser(phone);
-    }
-    return user;
-  }
-
-  Future<UserModel?> updateUser(
-      ObjectId id, Map<String, dynamic> updates) async {
-    var modifyUpdate = modify.set('updated_at', DateTime.now());
+  Future<UserModel?> updateUser(String id, Map<String, dynamic> updates) async {
+    final sets = <String>['updated_at = now()'];
+    final parameters = <String, Object?>{'id': id};
 
     if (updates.containsKey('display_name') &&
         updates['display_name'] != null) {
-      modifyUpdate = modifyUpdate.set('display_name', updates['display_name']);
+      sets.add('display_name = @display_name');
+      parameters['display_name'] = updates['display_name'];
     }
     if (updates.containsKey('username') && updates['username'] != null) {
-      modifyUpdate = modifyUpdate.set('username', updates['username']);
+      sets.add('username = @username');
+      parameters['username'] = updates['username'];
     }
     if (updates.containsKey('avatar_url') && updates['avatar_url'] != null) {
-      modifyUpdate = modifyUpdate.set('avatar_url', updates['avatar_url']);
+      sets.add('avatar_url = @avatar_url');
+      parameters['avatar_url'] = updates['avatar_url'];
     }
     if (updates.containsKey('about') && updates['about'] != null) {
-      modifyUpdate = modifyUpdate.set('about', updates['about']);
+      sets.add('about = @about');
+      parameters['about'] = updates['about'];
     }
     if (updates.containsKey('privacy') && updates['privacy'] is Map) {
-      modifyUpdate = modifyUpdate.set('privacy', updates['privacy']);
+      sets.add('privacy = @privacy:jsonb');
+      parameters['privacy'] = updates['privacy'];
     }
 
-    await _db.users.updateOne(where.eq('_id', id), modifyUpdate);
+    await _db.execute(
+      'UPDATE users SET ${sets.join(', ')} WHERE id = @id:uuid',
+      parameters: parameters,
+    );
     return findUserById(id);
   }
 
   /// Returns registered users whose phone numbers match any of the supplied
   /// SHA-256 hashes. Used for privacy-preserving contact discovery.
   Future<List<UserModel>> findUsersByPhoneHashes(Set<String> hashes) async {
-    final users = await _db.users.find(where.ne('phone', null)).toList();
-    final matched = <UserModel>[];
-    for (final userData in users) {
-      final user = UserModel.fromMap(userData);
-      if (user.phone != null && hashes.contains(_hashPhone(user.phone!))) {
-        matched.add(user);
-      }
+    if (hashes.isEmpty) return [];
+    final params = <String, Object?>{};
+    final placeholders = <String>[];
+    var i = 0;
+    for (final hash in hashes) {
+      params['h$i'] = hash;
+      placeholders.add('@h$i');
+      i++;
     }
-    return matched;
+    final rows = await _db.query(
+      'SELECT * FROM users WHERE phone_hash IN (${placeholders.join(', ')})',
+      parameters: params,
+    );
+    return rows.map(UserModel.fromMap).toList();
   }
 
   static String _hashPhone(String phone) {
     return sha256.convert(utf8.encode(phone.trim())).toString();
   }
 
-  Future<void> updateOnlineStatus(ObjectId id, bool isOnline) async {
-    await _db.users.updateOne(
-      where.eq('_id', id),
-      modify.set('is_online', isOnline).set('last_seen', DateTime.now()),
+  Future<void> updateOnlineStatus(String id, bool isOnline) async {
+    await _db.execute(
+      'UPDATE users SET is_online = @online, last_seen = now() WHERE id = @id:uuid',
+      parameters: {'online': isOnline, 'id': id},
     );
   }
 
-  /// Search users by phone, username, display name, or email
-  Future<List<UserModel>> searchUsers(String query) async {
-    final users = await _db.users
-        .find(
-          where
-              .match('phone', query)
-              .or(where.match('username', query))
-              .or(where.match('display_name', query))
-              .or(where.match('email', query)),
-        )
-        .toList();
-    return users.map((u) => UserModel.fromMap(u)).toList();
+  /// Search users by phone, username, display name, or email.
+  ///
+  /// The query is matched with an escaped `ILIKE` pattern (no regex), so
+  /// user-supplied text can never become a query-language injection.
+  Future<List<UserModel>> searchUsers(String query, {int limit = 20}) async {
+    final pattern = _escapeLike(query);
+    final rows = await _db.query(
+      '''
+      SELECT * FROM users
+      WHERE phone ILIKE @pattern
+         OR username ILIKE @pattern
+         OR display_name ILIKE @pattern
+         OR email ILIKE @pattern
+      ORDER BY created_at DESC
+      LIMIT @limit
+      ''',
+      parameters: {'pattern': '%$pattern%', 'limit': limit},
+    );
+    return rows.map(UserModel.fromMap).toList();
   }
 
-  Future<List<UserModel>> getAllUsers() async {
-    final users = await _db.users.find().toList();
-    return users.map((u) => UserModel.fromMap(u)).toList();
+  /// Escapes LIKE metacharacters so user-supplied search text is treated
+  /// literally by the SQL pattern matcher.
+  static String _escapeLike(String input) {
+    return input.replaceAll(r'\', r'\\').replaceAll('%', r'\%').replaceAll('_', r'\_');
+  }
+
+  // ---------------------------------------------------------------------------
+  // Refresh token revocation
+  // ---------------------------------------------------------------------------
+
+  /// Stores the jti of the only refresh token allowed to rotate the session.
+  /// Minting a new refresh token overwrites this, invalidating every older
+  /// one (single active refresh session per user).
+  Future<void> setCurrentRefreshJti(String userId, String jti) async {
+    await _db.execute(
+      'UPDATE users SET current_refresh_jti = @jti WHERE id = @id:uuid',
+      parameters: {'jti': jti, 'id': userId},
+    );
+  }
+
+  Future<String?> getRefreshJti(String userId) async {
+    final row = await _db.queryOne(
+      'SELECT current_refresh_jti FROM users WHERE id = @id:uuid',
+      parameters: {'id': userId},
+    );
+    return row?['current_refresh_jti'] as String?;
+  }
+
+  /// Clears the stored refresh jti — used on logout so a stolen refresh token
+  /// can no longer mint new sessions.
+  Future<void> clearRefreshJti(String userId) async {
+    await _db.execute(
+      'UPDATE users SET current_refresh_jti = NULL WHERE id = @id:uuid',
+      parameters: {'id': userId},
+    );
   }
 }

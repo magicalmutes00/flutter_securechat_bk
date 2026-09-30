@@ -1,8 +1,8 @@
 import 'dart:convert';
 import 'package:shelf/shelf.dart';
 import 'package:shelf_router/shelf_router.dart';
-import 'package:mongo_dart/mongo_dart.dart';
 import '../services/push_service.dart';
+import '../utils/api_responses.dart';
 
 class PushRoutes {
   final PushService _pushService = PushService();
@@ -36,7 +36,7 @@ class PushRoutes {
       }
 
       await _pushService.registerToken(
-        userId: ObjectId.fromHexString(userId),
+        userId: userId,
         token: token,
         platform: (data['platform'] as String?) ?? 'android',
       );
@@ -46,11 +46,7 @@ class PushRoutes {
         headers: {'Content-Type': 'application/json'},
       );
     } catch (e) {
-      return Response(
-        500,
-        body: jsonEncode({'error': 'Failed to register push token: $e'}),
-        headers: {'Content-Type': 'application/json'},
-      );
+      return serverError('Failed to register push token', e);
     }
   }
 
@@ -69,7 +65,7 @@ class PushRoutes {
       final token = (data['token'] as String?)?.trim() ?? '';
 
       await _pushService.unregisterToken(
-        userId: ObjectId.fromHexString(userId),
+        userId: userId,
         token: token,
       );
 
@@ -78,11 +74,7 @@ class PushRoutes {
         headers: {'Content-Type': 'application/json'},
       );
     } catch (e) {
-      return Response(
-        500,
-        body: jsonEncode({'error': 'Failed to unregister push token: $e'}),
-        headers: {'Content-Type': 'application/json'},
-      );
+      return serverError('Failed to unregister push token', e);
     }
   }
 }

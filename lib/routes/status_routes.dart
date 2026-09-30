@@ -1,9 +1,10 @@
 import 'dart:convert';
 import 'package:shelf/shelf.dart';
 import 'package:shelf_router/shelf_router.dart';
-import 'package:mongo_dart/mongo_dart.dart';
+import '../utils/validate.dart';
 import '../services/status_service.dart';
 import '../services/user_service.dart';
+import '../utils/api_responses.dart';
 
 class StatusRoutes {
   final StatusService _statusService = StatusService();
@@ -45,11 +46,7 @@ class StatusRoutes {
         headers: {'Content-Type': 'application/json'},
       );
     } catch (e) {
-      return Response(
-        500,
-        body: jsonEncode({'error': 'Failed to load statuses: $e'}),
-        headers: {'Content-Type': 'application/json'},
-      );
+      return serverError('Failed to load statuses', e);
     }
   }
 
@@ -78,7 +75,7 @@ class StatusRoutes {
       }
 
       final status = await _statusService.createStatus(
-        userId: ObjectId.fromHexString(userId),
+        userId: userId,
         text: text.isEmpty ? null : text,
         mediaPath: mediaPath,
         mediaType: mediaType,
@@ -89,11 +86,7 @@ class StatusRoutes {
         headers: {'Content-Type': 'application/json'},
       );
     } catch (e) {
-      return Response(
-        500,
-        body: jsonEncode({'error': 'Failed to create status: $e'}),
-        headers: {'Content-Type': 'application/json'},
-      );
+      return serverError('Failed to create status', e);
     }
   }
 
@@ -107,10 +100,14 @@ class StatusRoutes {
         );
       }
 
-      final status = await _statusService.markViewed(
-        ObjectId.fromHexString(id),
-        ObjectId.fromHexString(userId),
-      );
+      if (!isValidUuid(id)) {
+        return Response(
+          400,
+          body: jsonEncode({'error': 'Invalid status ID format'}),
+          headers: {'Content-Type': 'application/json'},
+        );
+      }
+      final status = await _statusService.markViewed(id, userId);
       if (status == null) {
         return Response.notFound(
           jsonEncode({'error': 'Status not found'}),
@@ -123,11 +120,7 @@ class StatusRoutes {
         headers: {'Content-Type': 'application/json'},
       );
     } catch (e) {
-      return Response(
-        500,
-        body: jsonEncode({'error': 'Failed to update status: $e'}),
-        headers: {'Content-Type': 'application/json'},
-      );
+      return serverError('Failed to update status', e);
     }
   }
 
@@ -142,37 +135,35 @@ class StatusRoutes {
       }
 
       // Only the author may delete their own status.
-      final status = await _statusService.getStatusById(
-        ObjectId.fromHexString(id),
-      );
+      if (!isValidUuid(id)) {
+        return Response(
+          400,
+          body: jsonEncode({'error': 'Invalid status ID format'}),
+          headers: {'Content-Type': 'application/json'},
+        );
+      }
+      final status = await _statusService.getStatusById(id);
       if (status == null) {
         return Response.notFound(
           jsonEncode({'error': 'Status not found'}),
           headers: {'Content-Type': 'application/json'},
         );
       }
-      if (status.userId != ObjectId.fromHexString(userId)) {
+      if (status.userId != userId) {
         return Response.forbidden(
           jsonEncode({'error': 'You can only delete your own statuses'}),
           headers: {'Content-Type': 'application/json'},
         );
       }
 
-      await _statusService.deleteStatus(
-        ObjectId.fromHexString(id),
-        ObjectId.fromHexString(userId),
-      );
+      await _statusService.deleteStatus(id, userId);
 
       return Response.ok(
         jsonEncode({'success': true}),
         headers: {'Content-Type': 'application/json'},
       );
     } catch (e) {
-      return Response(
-        500,
-        body: jsonEncode({'error': 'Failed to delete status: $e'}),
-        headers: {'Content-Type': 'application/json'},
-      );
+      return serverError('Failed to delete status', e);
     }
   }
 }

@@ -1,15 +1,20 @@
 import 'package:test/test.dart';
+import 'package:secure_chat_server/config/env_config.dart';
 import 'package:secure_chat_server/services/jwt_service.dart';
 
 void main() {
   late JwtService svc;
 
-  setUp(() {
-    svc = JwtService(
-      secret: 'abcdefghijklmnopabcdefghijklmnop',
-      issuer: 'test-server',
-      audience: 'test-mobile',
+  setUpAll(() {
+    EnvConfig.setForTesting(
+      'JWT_SECRET',
+      'test-secret-0123456789abcdef0123456789abcdef',
     );
+    EnvConfig.setForTesting('JWT_ISSUER', 'test-server');
+  });
+
+  setUp(() {
+    svc = JwtService();
   });
 
   test('issue and verify access token', () {
@@ -22,20 +27,15 @@ void main() {
     expect(payload['phone'], '+14155551234');
     expect(payload['type'], 'access');
     expect(payload['iss'], 'test-server');
-    expect(payload['aud'], 'test-mobile');
   });
 
-  test('rejects expired token', () {
-    svc = JwtService(
-      secret: 'abcdefghijklmnopabcdefghijklmnop',
-      issuer: 'test-server',
-      audience: 'test-mobile',
-    );
-    final result = svc.verifyToken('garbage.garbage.garbage');
-    expect(result, isNull);
+  test('garbage and empty tokens are rejected', () {
+    expect(svc.verifyToken('garbage.garbage.garbage'), isNull);
+    expect(svc.verifyToken(''), isNull);
+    expect(svc.verifyToken('not-a-jwt'), isNull);
   });
 
-  test('refresh token rotation', () {
+  test('refresh token rotation issues a new pair', () {
     final refresh = svc.generateRefreshToken('user123');
     expect(refresh, isNotEmpty);
 
@@ -48,22 +48,28 @@ void main() {
     final payload = svc.verifyToken(refresh);
     expect(payload, isNotNull);
     expect(payload!['sub'], 'user123');
+    expect(payload['type'], 'refresh');
   });
 
-  test('rejects token with wrong audience', () {
-    final target = JwtService(
-      secret: 'abcdefghijklmnopabcdefghijklmnop',
-      issuer: 'test-server',
-      audience: 'test-mobile',
-    );
-    final token = target.generateAccessToken('user1', '+14155551234');
+  test('refresh flow rejects access tokens', () {
+    final access = svc.generateAccessToken('user123', null);
+    expect(svc.refreshTokens(access), isNull);
+  });
 
-    // Use a service with a different audience
-    final wrongAudience = JwtService(
-      secret: 'abcdefghijklmnopabcdefghijklmnop',
-      issuer: 'test-server',
-      audience: 'other-app',
+  test('tokens from a different secret are rejected', () {
+    final token = svc.generateAccessToken('user123', null);
+
+    EnvConfig.setForTesting(
+      'JWT_SECRET',
+      'another-secret-0123456789abcdef012345678',
     );
-    expect(wrongAudience.verifyToken(token), isNull);
+    final other = JwtService();
+    expect(other.verifyToken(token), isNull);
+
+    // Restore for the remaining tests.
+    EnvConfig.setForTesting(
+      'JWT_SECRET',
+      'test-secret-0123456789abcdef0123456789abcdef',
+    );
   });
 }

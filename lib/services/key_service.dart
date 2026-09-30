@@ -1,15 +1,12 @@
-import 'package:mongo_dart/mongo_dart.dart';
 import '../models/key_model.dart';
 import 'database_service.dart';
 
 class KeyService {
   final DatabaseService _db = DatabaseService();
 
-  DbCollection get _keys => _db.keys;
-
   /// Upserts a user's public key bundle for a device.
   Future<void> saveBundle({
-    required ObjectId userId,
+    required String userId,
     required String deviceId,
     required int registrationId,
     required String identityKeyPublic,
@@ -18,53 +15,52 @@ class KeyService {
     required String signedPrekeySignature,
     required List<String> oneTimePrekeys,
   }) async {
-    final now = DateTime.now();
-
-    final oneTimePrekeyModels = <OneTimePrekey>[];
+    final oneTimePrekeyModels = <Map<String, dynamic>>[];
     for (var i = 0; i < oneTimePrekeys.length; i++) {
       oneTimePrekeyModels.add(
-        OneTimePrekey(keyId: i + 1, publicKey: oneTimePrekeys[i]),
+        OneTimePrekey(keyId: i + 1, publicKey: oneTimePrekeys[i]).toMap(),
       );
     }
 
-    final keyModel = KeyModel(
-      id: ObjectId(),
-      userId: userId,
-      deviceId: deviceId,
-      registrationId: registrationId,
-      identityKeyPublic: identityKeyPublic,
-      signedPrekeyId: signedPrekeyId,
-      signedPrekeyPublic: signedPrekeyPublic,
-      signedPrekeySignature: signedPrekeySignature,
-      oneTimePrekeys: oneTimePrekeyModels,
-      createdAt: now,
-      updatedAt: now,
-    );
-
-    await _keys.updateOne(
-      where.eq('user_id', userId).eq('device_id', deviceId),
-      modify
-          .set('registration_id', keyModel.registrationId)
-          .set('identity_key_public', keyModel.identityKeyPublic)
-          .set('signed_prekey_id', keyModel.signedPrekeyId)
-          .set('signed_prekey_public', keyModel.signedPrekeyPublic)
-          .set('signed_prekey_signature', keyModel.signedPrekeySignature)
-          .set('one_time_prekeys',
-              oneTimePrekeyModels.map((k) => k.toMap()).toList())
-          .set('updated_at', now)
-          .set('created_at', now),
-      upsert: true,
+    await _db.execute(
+      '''
+      INSERT INTO keys
+        (user_id, device_id, registration_id, identity_key_public,
+         signed_prekey_id, signed_prekey_public, signed_prekey_signature, one_time_prekeys)
+      VALUES
+        (@user_id:uuid, @device_id, @registration_id, @identity_key_public,
+         @signed_prekey_id, @signed_prekey_public, @signed_prekey_signature, @prekeys:jsonb)
+      ON CONFLICT (user_id, device_id) DO UPDATE SET
+        registration_id = EXCLUDED.registration_id,
+        identity_key_public = EXCLUDED.identity_key_public,
+        signed_prekey_id = EXCLUDED.signed_prekey_id,
+        signed_prekey_public = EXCLUDED.signed_prekey_public,
+        signed_prekey_signature = EXCLUDED.signed_prekey_signature,
+        one_time_prekeys = EXCLUDED.one_time_prekeys,
+        updated_at = now()
+      ''',
+      parameters: {
+        'user_id': userId,
+        'device_id': deviceId,
+        'registration_id': registrationId,
+        'identity_key_public': identityKeyPublic,
+        'signed_prekey_id': signedPrekeyId,
+        'signed_prekey_public': signedPrekeyPublic,
+        'signed_prekey_signature': signedPrekeySignature,
+        'prekeys': oneTimePrekeyModels,
+      },
     );
   }
 
   /// Appends additional one-time prekeys for a user/device.
   Future<void> addOneTimePrekeys({
-    required ObjectId userId,
+    required String userId,
     required String deviceId,
     required List<String> oneTimePrekeys,
   }) async {
-    final existing = await _keys.findOne(
-      where.eq('user_id', userId).eq('device_id', deviceId),
+    final existing = await _db.queryOne(
+      'SELECT * FROM keys WHERE user_id = @user_id:uuid AND device_id = @device_id',
+      parameters: {'user_id': userId, 'device_id': deviceId},
     );
     if (existing == null) {
       throw Exception('No key bundle found. Upload a bundle first.');
@@ -80,36 +76,69 @@ class KeyService {
       return OneTimePrekey(keyId: nextId, publicKey: public).toMap();
     }).toList();
 
-    await _keys.updateOne(
-      where.eq('_id', keyModel.id),
-      modify
-          .pushAll('one_time_prekeys', additions)
-          .set('updated_at', DateTime.now()),
+    await _db.execute(
+      '''
+      UPDATE keys SET one_time_prekeys = one_time_prekeys || @additions:jsonb, updated_at = now()
+      WHERE user_id = @user_id:uuid AND device_id = @device_id
+      ''',
+      parameters: {
+        'additions': additions,
+        'user_id': userId,
+        'device_id': deviceId,
+      },
     );
   }
 
-  /// Returns the key bundle for a user's device along with a single one-time
-  /// prekey. The one-time prekey is consumed (removed) after retrieval as it
-  /// can only be used once.
+  /// Returns the key bundle for a user along with a single one-time prekey.
+  ///
+  /// The prekey is consumed atomically (row-locked CTE) as it can only be
+  /// used once — concurrent fetches can never receive the same prekey.
   Future<Map<String, dynamic>?> getBundle({
-    required ObjectId userId,
+    required String userId,
     String? deviceId,
   }) async {
-    final selector = deviceId == null || deviceId.isEmpty
-        ? where.eq('user_id', userId)
-        : where.eq('user_id', userId).eq('device_id', deviceId);
-    final data = await _keys.findOne(selector);
-    if (data == null) return null;
+    final row = await _db.queryOne(
+      '''
+      WITH target AS (
+        SELECT user_id, device_id, one_time_prekeys->0 AS popped
+        FROM keys
+        WHERE user_id = @user_id:uuid
+          AND (@device_id = '' OR device_id = @device_id)
+          AND jsonb_array_length(one_time_prekeys) > 0
+        FOR UPDATE
+      ),
+      updated AS (
+        UPDATE keys k
+        SET one_time_prekeys = k.one_time_prekeys - 0, updated_at = now()
+        FROM target t
+        WHERE k.user_id = t.user_id AND k.device_id = t.device_id
+        RETURNING k.*
+      )
+      SELECT u.*, t.popped
+      FROM updated u CROSS JOIN target t
+      ''',
+      parameters: {'user_id': userId, 'device_id': deviceId ?? ''},
+    );
 
-    final keyModel = KeyModel.fromMap(data);
+    if (row != null) {
+      return _bundleResponse(row);
+    }
 
+    // No consumable prekey — return the bundle itself.
+    final bundleRow = await _db.queryOne(
+      'SELECT * FROM keys WHERE user_id = @user_id:uuid AND (@device_id = \'\' OR device_id = @device_id)',
+      parameters: {'user_id': userId, 'device_id': deviceId ?? ''},
+    );
+    if (bundleRow == null) return null;
+    return _bundleResponse(bundleRow);
+  }
+
+  Map<String, dynamic> _bundleResponse(Map<String, dynamic> row) {
+    final keyModel = KeyModel.fromMap(row);
+    final popped = row['popped'];
     OneTimePrekey? oneTime;
-    if (keyModel.oneTimePrekeys.isNotEmpty) {
-      oneTime = keyModel.oneTimePrekeys.first;
-      await _keys.updateOne(
-        where.eq('_id', keyModel.id),
-        modify.pull('one_time_prekeys', where.eq('key_id', oneTime.keyId)),
-      );
+    if (popped is Map) {
+      oneTime = OneTimePrekey.fromMap(Map<String, dynamic>.from(popped));
     }
 
     return {
@@ -120,20 +149,23 @@ class KeyService {
   }
 
   /// Whether a user/device has uploaded a key bundle.
-  Future<bool> hasBundle(ObjectId userId, String deviceId) async {
-    final count = await _keys.count(
-      where.eq('user_id', userId).eq('device_id', deviceId),
+  Future<bool> hasBundle(String userId, String deviceId) async {
+    final row = await _db.queryOne(
+      'SELECT 1 FROM keys WHERE user_id = @user_id:uuid AND device_id = @device_id',
+      parameters: {'user_id': userId, 'device_id': deviceId},
     );
-    return count > 0;
+    return row != null;
   }
 
   /// Number of one-time prekeys remaining on the server for a user/device.
-  Future<int> remainingOneTimePrekeys(ObjectId userId, String deviceId) async {
-    final data = await _keys.findOne(
-      where.eq('user_id', userId).eq('device_id', deviceId),
+  Future<int> remainingOneTimePrekeys(String userId, String deviceId) async {
+    final row = await _db.queryOne(
+      '''
+      SELECT jsonb_array_length(one_time_prekeys) AS n
+      FROM keys WHERE user_id = @user_id:uuid AND device_id = @device_id
+      ''',
+      parameters: {'user_id': userId, 'device_id': deviceId},
     );
-    if (data == null) return 0;
-    final keyModel = KeyModel.fromMap(data);
-    return keyModel.oneTimePrekeys.length;
+    return (row?['n'] as int?) ?? 0;
   }
 }

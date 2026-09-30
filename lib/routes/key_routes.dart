@@ -1,10 +1,11 @@
 import 'dart:convert';
 
-import 'package:mongo_dart/mongo_dart.dart';
+import '../utils/validate.dart';
 import 'package:shelf/shelf.dart';
 import 'package:shelf_router/shelf_router.dart';
 
 import '../services/key_service.dart';
+import '../utils/api_responses.dart';
 
 class KeyRoutes {
   final KeyService _keyService = KeyService();
@@ -49,7 +50,7 @@ class KeyRoutes {
       }
 
       await _keyService.saveBundle(
-        userId: ObjectId.fromHexString(userId),
+        userId: userId,
         deviceId: deviceId,
         registrationId: registrationId ?? 0,
         identityKeyPublic: identityKeyPublic,
@@ -64,11 +65,7 @@ class KeyRoutes {
         headers: {'Content-Type': 'application/json'},
       );
     } catch (e) {
-      return Response(
-        500,
-        body: jsonEncode({'error': 'Failed to upload key bundle: $e'}),
-        headers: {'Content-Type': 'application/json'},
-      );
+      return serverError('Failed to upload key bundle', e);
     }
   }
 
@@ -99,7 +96,7 @@ class KeyRoutes {
       }
 
       await _keyService.addOneTimePrekeys(
-        userId: ObjectId.fromHexString(userId),
+        userId: userId,
         deviceId: deviceId,
         oneTimePrekeys: oneTimePrekeys,
       );
@@ -109,11 +106,7 @@ class KeyRoutes {
         headers: {'Content-Type': 'application/json'},
       );
     } catch (e) {
-      return Response(
-        500,
-        body: jsonEncode({'error': 'Failed to add one-time prekeys: $e'}),
-        headers: {'Content-Type': 'application/json'},
-      );
+      return serverError('Failed to add one-time prekeys', e);
     }
   }
 
@@ -127,10 +120,7 @@ class KeyRoutes {
         );
       }
 
-      final ObjectId targetOid;
-      try {
-        targetOid = ObjectId.fromHexString(userId);
-      } catch (e) {
+      if (!isValidUuid(userId)) {
         return Response(
           400,
           body: jsonEncode({'error': 'Invalid user ID format'}),
@@ -138,7 +128,7 @@ class KeyRoutes {
         );
       }
 
-      final bundle = await _keyService.getBundle(userId: targetOid);
+      final bundle = await _keyService.getBundle(userId: userId);
       if (bundle == null) {
         return Response.notFound(
           jsonEncode({'error': 'No key bundle for user'}),
@@ -151,11 +141,7 @@ class KeyRoutes {
         headers: {'Content-Type': 'application/json'},
       );
     } catch (e) {
-      return Response(
-        500,
-        body: jsonEncode({'error': 'Failed to fetch key bundle: $e'}),
-        headers: {'Content-Type': 'application/json'},
-      );
+      return serverError('Failed to fetch key bundle', e);
     }
   }
 
@@ -170,25 +156,16 @@ class KeyRoutes {
       }
 
       final deviceId = request.url.queryParameters['device_id'] ?? '';
-      final has = await _keyService.hasBundle(
-        ObjectId.fromHexString(userId),
-        deviceId,
-      );
-      final count = await _keyService.remainingOneTimePrekeys(
-        ObjectId.fromHexString(userId),
-        deviceId,
-      );
+      final has = await _keyService.hasBundle(userId, deviceId);
+      final count =
+          await _keyService.remainingOneTimePrekeys(userId, deviceId);
 
       return Response.ok(
         jsonEncode({'has_bundle': has, 'one_time_prekey_count': count}),
         headers: {'Content-Type': 'application/json'},
       );
     } catch (e) {
-      return Response(
-        500,
-        body: jsonEncode({'error': 'Failed to check key bundle: $e'}),
-        headers: {'Content-Type': 'application/json'},
-      );
+      return serverError('Failed to check key bundle', e);
     }
   }
 }

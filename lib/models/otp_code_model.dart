@@ -1,9 +1,13 @@
-import 'package:mongo_dart/mongo_dart.dart';
-
+/// A single-use verification code for the legacy OTP flow.
+///
+/// Codes are never stored in plaintext: [codeHash] is SHA-256 of
+/// `salt + code` with a per-code random [salt], so a database dump cannot be
+/// replayed against the verification endpoint.
 class OtpCodeModel {
-  final ObjectId id;
+  final String id; // UUID
   final String phone;
-  final String code;
+  final String codeHash;
+  final String salt;
   final String purpose;
   final DateTime expiresAt;
   final bool isUsed;
@@ -13,7 +17,8 @@ class OtpCodeModel {
   OtpCodeModel({
     required this.id,
     required this.phone,
-    required this.code,
+    required this.codeHash,
+    required this.salt,
     required this.purpose,
     required this.expiresAt,
     required this.isUsed,
@@ -23,76 +28,17 @@ class OtpCodeModel {
 
   factory OtpCodeModel.fromMap(Map<String, dynamic> map) {
     return OtpCodeModel(
-      id: map['_id'] as ObjectId,
+      id: map['id'] as String,
       phone: map['phone'] as String,
-      code: map['code'] as String,
+      codeHash: map['code_hash'] as String,
+      salt: map['salt'] as String,
       purpose: map['purpose'] as String,
-      expiresAt: map['expires_at'] as DateTime,
+      expiresAt: (map['expires_at'] as DateTime).toUtc(),
       isUsed: map['is_used'] as bool,
-      createdAt: map['created_at'] as DateTime,
-      attempts: map['attempts'] as int? ?? 0,
+      createdAt: (map['created_at'] as DateTime).toUtc(),
+      attempts: (map['attempts'] as int?) ?? 0,
     );
   }
 
-  Map<String, dynamic> toMap() {
-    return {
-      '_id': id,
-      'phone': phone,
-      'code': code,
-      'purpose': purpose,
-      'expires_at': expiresAt,
-      'is_used': isUsed,
-      'created_at': createdAt,
-      'attempts': attempts,
-    };
-  }
-
-  Map<String, dynamic> toJson() {
-    return {
-      'id': id.toHexString(),
-      'phone': phone,
-      'code': code,
-      'purpose': purpose,
-      'expires_at': expiresAt.toIso8601String(),
-      'is_used': isUsed,
-      'created_at': createdAt.toIso8601String(),
-      'attempts': attempts,
-    };
-  }
-
-  Map<String, dynamic> toJsonForClient() {
-    return {
-      'id': id.toHexString(),
-      'phone': phone,
-      'purpose': purpose,
-      'expires_at': expiresAt.toIso8601String(),
-      'is_used': isUsed,
-      'created_at': createdAt.toIso8601String(),
-      'attempts': attempts,
-    };
-  }
-
-  OtpCodeModel copyWith({
-    ObjectId? id,
-    String? phone,
-    String? code,
-    String? purpose,
-    DateTime? expiresAt,
-    bool? isUsed,
-    DateTime? createdAt,
-    int? attempts,
-  }) {
-    return OtpCodeModel(
-      id: id ?? this.id,
-      phone: phone ?? this.phone,
-      code: code ?? this.code,
-      purpose: purpose ?? this.purpose,
-      expiresAt: expiresAt ?? this.expiresAt,
-      isUsed: isUsed ?? this.isUsed,
-      createdAt: createdAt ?? this.createdAt,
-      attempts: attempts ?? this.attempts,
-    );
-  }
-
-  bool get isExpired => DateTime.now().isAfter(expiresAt);
+  bool get isExpired => DateTime.now().toUtc().isAfter(expiresAt);
 }

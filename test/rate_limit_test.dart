@@ -3,56 +3,70 @@ import 'package:shelf/shelf.dart' as shelf;
 import 'package:secure_chat_server/middleware/rate_limit_middleware.dart';
 
 void main() {
-  test('sliding window blocks exceeding requests', () async {
-    final limiter = rateLimitMiddleware(
-      limiter: RateLimiter(maxRequests: 3, window: Duration(seconds: 60)),
-    );
-    int calls = 0;
-    final innerHandler = (shelf.Request req) async {
-      calls++;
-      return shelf.Response.ok('ok');
-    };
-    final handler = limiter(innerHandler);
+  group('RateLimiter', () {
+    test('blocks requests beyond the limit for the same key', () {
+      final limiter = RateLimiter(
+        maxRequests: 3,
+        window: const Duration(seconds: 60),
+      );
+      expect(limiter.allow('ip-a'), isTrue);
+      expect(limiter.allow('ip-a'), isTrue);
+      expect(limiter.allow('ip-a'), isTrue);
+      expect(limiter.allow('ip-a'), isFalse);
+      expect(limiter.allow('ip-a'), isFalse);
+    });
 
-    final req = shelf.Request('GET', Uri.parse('http://test/'));
+    test('keys have independent limits', () {
+      final limiter = RateLimiter(
+        maxRequests: 1,
+        window: const Duration(seconds: 60),
+      );
+      expect(limiter.allow('ip-a'), isTrue);
+      expect(limiter.allow('ip-a'), isFalse);
+      expect(limiter.allow('ip-b'), isTrue);
+      expect(limiter.allow('ip-b'), isFalse);
+    });
 
-    for (int i = 0; i < 3; i++) {
-      final resp = await handler(req);
-      expect(resp.statusCode, 200);
-    }
-    final blocked = await handler(req);
-    expect(blocked.statusCode, 429);
-    expect(blocked.headers['retry-after'], isNotNull);
-    expect(calls, 3);
+    test('window slides after expiry', () async {
+      final limiter = RateLimiter(
+        maxRequests: 1,
+        window: const Duration(milliseconds: 100),
+      );
+      expect(limiter.allow('ip-a'), isTrue);
+      expect(limiter.allow('ip-a'), isFalse);
+
+      await Future.delayed(const Duration(milliseconds: 150));
+      expect(limiter.allow('ip-a'), isTrue);
+    });
   });
 
-  test('different IPs have independent limits', () async {
-    final limiter = rateLimitMiddleware(
-      limiter: RateLimiter(maxRequests: 1, window: Duration(seconds: 60)),
-    );
-    final handler = limiter((shelf.Request req) async => shelf.Response.ok('ok'));
+  group('rateLimitMiddleware', () {
+    test('passes requests under the limit and returns 429 beyond it',
+        () async {
+      final limiter = RateLimiter(
+        maxRequests: 2,
+        window: const Duration(seconds: 60),
+      );
+      final middleware = rateLimitMiddleware(limiter);
+      final handler =
+          middleware((shelf.Request req) async => shelf.Response.ok('ok'));
 
-    final reqA = shelf.Request('GET', Uri.parse('http://test/'),
-      headers: {'x-forwarded-for': '1.2.3.4'});
-    final reqB = shelf.Request('GET', Uri.parse('http://test/'),
-      headers: {'x-forwarded-for': '5.6.7.8'});
+      shelf.Request request() =>
+          shelf.Request('GET', Uri.parse('http://test/'));
 
-    expect((await handler(reqA)).statusCode, 200);
-    expect((await handler(reqB)).statusCode, 200);
-    expect((await handler(reqA)).statusCode, 429);
-    expect((await handler(reqB)).statusCode, 429);
-  });
+      // Without connection info every request keys to the same bucket.
+      expect((await handler(request())).statusCode, 200);
+      expect((await handler(request())).statusCode, 200);
 
-  test('window slides after timeout', () async {
-    final limiter = rateLimitMiddleware(
-      limiter: RateLimiter(maxRequests: 1, window: Duration(seconds: 1)),
-    );
-    final handler = limiter((shelf.Request req) async => shelf.Response.ok('ok'));
-
-    final req = shelf.Request('GET', Uri.parse('http://test/'));
-    expect((await handler(req)).statusCode, 200);
-
-    await Future.delayed(const Duration(milliseconds: 1100));
-    expect((await handler(req)).statusCode, 200);
+      var calls = 0;
+      final countingHandler = middleware((shelf.Request req) async {
+        calls++;
+        return shelf.Response.ok('ok');
+      });
+      final blocked = await countingHandler(request());
+      expect(blocked.statusCode, 429);
+      expect(blocked.headers['retry-after'], isNotNull);
+      expect(calls, 0);
+    });
   });
 }

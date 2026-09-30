@@ -1,8 +1,10 @@
+import 'dart:convert';
+
 import 'package:shelf/shelf.dart';
-import 'package:mongo_dart/mongo_dart.dart';
+
 import '../services/jwt_service.dart';
 import '../services/user_service.dart';
-import 'dart:convert';
+import '../utils/validate.dart';
 
 class AuthMiddleware {
   final JwtService _jwtService = JwtService();
@@ -31,15 +33,14 @@ class AuthMiddleware {
         }
 
         final userId = payload['sub'] as String?;
-        if (userId == null) {
+        if (userId == null || !isValidUuid(userId)) {
           return Response.unauthorized(
             jsonEncode({'error': 'Invalid token payload'}),
             headers: {'Content-Type': 'application/json'},
           );
         }
 
-        final user =
-            await _userService.findUserById(ObjectId.fromHexString(userId));
+        final user = await _userService.findUserById(userId);
         if (user == null) {
           return Response.unauthorized(
             jsonEncode({'error': 'User not found'}),

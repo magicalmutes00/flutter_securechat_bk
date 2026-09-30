@@ -1,133 +1,277 @@
-import 'package:mongo_dart/mongo_dart.dart';
+import 'package:postgres/postgres.dart';
+
 import '../config/app_config.dart';
 
+/// PostgreSQL access layer backed by a Supabase database.
+///
+/// The connection string comes from `SUPABASE_DB_URL` (Supabase → Project
+/// Settings → Database → Connection string, session pooler / port 5432).
+/// The schema below is created idempotently on startup, so pointing the
+/// server at an empty Supabase project is enough — no manual SQL step.
 class DatabaseService {
-  static Db? _database;
+  static Pool? _pool;
   static final DatabaseService _instance = DatabaseService._internal();
 
   factory DatabaseService() => _instance;
 
   DatabaseService._internal();
 
-  Db get database {
-    if (_database == null) {
+  Pool get pool {
+    final p = _pool;
+    if (p == null) {
       throw Exception('Database not initialized. Call initialize() first.');
     }
-    return _database!;
+    return p;
+  }
+
+  /// Runs [sql] with named `@param` placeholders and returns the raw result.
+  Future<Result> execute(String sql, {Map<String, Object?>? parameters}) {
+    return pool.execute(Sql.named(sql), parameters: parameters);
+  }
+
+  /// Runs [sql] and returns rows as plain column-name → value maps
+  /// (snake_case column names, matching the previous Mongo document keys).
+  Future<List<Map<String, dynamic>>> query(
+    String sql, {
+    Map<String, Object?>? parameters,
+  }) async {
+    final result = await execute(sql, parameters: parameters);
+    return result.map((row) => row.toColumnMap()).toList();
+  }
+
+  /// Runs [sql] and returns the first row, or null.
+  Future<Map<String, dynamic>?> queryOne(
+    String sql, {
+    Map<String, Object?>? parameters,
+  }) async {
+    final rows = await query(sql, parameters: parameters);
+    return rows.isEmpty ? null : rows.first;
+  }
+
+  Future<int> executeCount(String sql, {Map<String, Object?>? parameters}) async {
+    final result = await execute(sql, parameters: parameters);
+    return result.affectedRows;
   }
 
   Future<void> initialize() async {
     try {
-      _database = Db(AppConfig.mongoConnectionString);
-      await _database!.open();
-      await _createIndexes();
-      print('MongoDB connected successfully');
+      _pool = _createPool();
+      // Force a real round trip so a bad URL/credentials fail fast at boot.
+      await pool.execute('SELECT 1');
+      await _createSchema();
+      print('Supabase PostgreSQL connected successfully');
     } catch (e) {
-      print('Failed to connect to MongoDB: $e');
+      print('Failed to connect to Supabase PostgreSQL: $e');
       rethrow;
     }
   }
 
-  Future<void> _createIndexes() async {
-    try {
-      // Sparse unique indexes allow multiple auth providers without forcing
-      // every user document to contain every credential field.
-      await _ensureIndex('users', keys: {'phone': 1}, unique: true, sparse: true);
-      await _ensureIndex('users', keys: {'email': 1}, unique: true, sparse: true);
-      await _ensureIndex('users', keys: {'firebase_uid': 1}, unique: true, sparse: true);
-      await _ensureIndex('users', keys: {'username': 1});
-      // Sparse unique index so each user has at most one phone hash.
-      await _ensureIndex('users', keys: {'phone_hash': 1}, unique: true, sparse: true);
-      await _ensureIndex('messages', keys: {'sender_id': 1, 'created_at': -1});
-      await _ensureIndex('messages', keys: {'receiver_id': 1, 'created_at': -1});
-      await _ensureIndex('messages',
-          keys: {'sender_id': 1, 'receiver_id': 1, 'created_at': -1});
-      await _ensureIndex('otp_codes', keys: {'phone': 1, 'code': 1});
-      // E2EE key bundles: one bundle per user per device.
-      await _ensureIndex(
-        'keys',
-        keys: {'user_id': 1, 'device_id': 1},
-        unique: true,
-      );
-      // Groups: index member arrays so "groups a user belongs to" is fast, and
-      // unique index on the group name for O(1) title lookups.
-      await _ensureIndex('groups', keys: {'member_ids': 1});
-      await _ensureIndex('groups', keys: {'name': 1}, unique: true);
-      await _ensureIndex('group_messages', keys: {'group_id': 1, 'created_at': -1});
-      await _ensureIndex('group_messages', keys: {'sender_id': 1, 'created_at': -1});
-      // Statuses: query active (non-expired) statuses efficiently.
-      await _ensureIndex('statuses', keys: {'expires_at': 1, 'created_at': -1});
-      await _ensureIndex('statuses', keys: {'user_id': 1, 'created_at': -1});
-      // Push tokens: unique per device token, indexed by owner.
-      await _ensureIndex('push_tokens', keys: {'token': 1}, unique: true);
-      await _ensureIndex('push_tokens', keys: {'user_id': 1});
-      print('Database indexes created successfully');
-    } catch (e) {
-      print('Error creating indexes: $e');
+  Pool _createPool() {
+    final uri = Uri.parse(AppConfig.supabaseDbUrl);
+    final userInfo = uri.userInfo;
+    final sep = userInfo.indexOf(':');
+    if (sep == -1) {
+      throw Exception(
+          'SUPABASE_DB_URL must look like postgresql://user:password@host:5432/postgres');
     }
-  }
-
-  /// Creates [collection]'s [keys] index, first dropping any existing index
-  /// that shares the auto-generated name but has a different spec (e.g. one
-  /// created by an older version without `sparse`). MongoDB rejects a new
-  /// index whose name collides with an existing index of different options.
-  Future<void> _ensureIndex(
-    String collection, {
-    required Map<String, dynamic> keys,
-    bool unique = false,
-    bool sparse = false,
-  }) async {
-    final name = keys.entries.map((e) => '${e.key}_${e.value}').join('_');
-
-    try {
-      final list = await _database!.runCommand({'listIndexes': collection});
-      final batch = (list['cursor']?['firstBatch'] ?? const []) as List;
-      for (final index in batch) {
-        if (index is Map && index['name'] == name) {
-          final keyMatches = _sameIndexKeys(index['key'], keys);
-          final uniqueMatches = (index['unique'] ?? false) == unique;
-          final sparseMatches = (index['sparse'] ?? false) == sparse;
-          if (!keyMatches || !uniqueMatches || !sparseMatches) {
-            await _database!.runCommand({
-              'dropIndexes': collection,
-              'index': name,
-            });
-            break;
-          }
-        }
-      }
-    } catch (_) {
-      // Introspection failed (e.g. collection does not exist yet); let
-      // createIndex surface any real error below.
+    final username = userInfo.substring(0, sep);
+    final password = Uri.decodeComponent(userInfo.substring(sep + 1));
+    final host = uri.host;
+    final port = uri.port == 0 ? 5432 : uri.port;
+    final database = uri.path.replaceFirst('/', '');
+    if (host.isEmpty || database.isEmpty) {
+      throw Exception('SUPABASE_DB_URL is missing host or database name');
     }
 
-    await _database!
-        .createIndex(collection, keys: keys, unique: unique, sparse: sparse);
+    // Local development databases usually have no TLS; Supabase requires it.
+    final isLocal = host == 'localhost' || host == '127.0.0.1' || host == '::1';
+
+    return Pool.withEndpoints(
+      [
+        Endpoint(
+            host: host,
+            port: port,
+            database: database,
+            username: username,
+            password: password),
+      ],
+      settings: PoolSettings(
+        sslMode: isLocal ? SslMode.disable : SslMode.require,
+        connectTimeout: const Duration(seconds: 15),
+        queryTimeout: const Duration(seconds: 30),
+        // Supabase poolers close idle connections aggressively; keep the pool
+        // small and let queries wait rather than multiplying connections.
+        maxConnectionCount: 10,
+      ),
+    );
   }
 
-  bool _sameIndexKeys(dynamic existing, Map<String, dynamic> wanted) {
-    if (existing is! Map || existing.length != wanted.length) return false;
-    for (final entry in wanted.entries) {
-      final value = existing[entry.key];
-      if (value is! num || value.toInt() != (entry.value as num).toInt()) {
-        return false;
-      }
-    }
-    return true;
-  }
+  Future<void> _createSchema() async {
+    await execute('CREATE EXTENSION IF NOT EXISTS pgcrypto');
 
-  DbCollection get users => _database!.collection('users');
-  DbCollection get messages => _database!.collection('messages');
-  DbCollection get otpCodes => _database!.collection('otp_codes');
-  DbCollection get keys => _database!.collection('keys');
-  DbCollection get groups => _database!.collection('groups');
-  DbCollection get groupMessages => _database!.collection('group_messages');
-  DbCollection get statuses => _database!.collection('statuses');
-  DbCollection get pushTokens => _database!.collection('push_tokens');
+    await execute('''
+      CREATE TABLE IF NOT EXISTS users (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        phone TEXT UNIQUE,
+        email TEXT UNIQUE,
+        firebase_uid TEXT UNIQUE,
+        username TEXT,
+        display_name TEXT,
+        avatar_url TEXT,
+        about TEXT,
+        password_hash TEXT,
+        phone_hash TEXT UNIQUE,
+        privacy JSONB NOT NULL DEFAULT '{}'::jsonb,
+        current_refresh_jti TEXT,
+        is_online BOOLEAN NOT NULL DEFAULT FALSE,
+        last_seen TIMESTAMPTZ,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      )
+    ''');
+    await execute('CREATE INDEX IF NOT EXISTS idx_users_username ON users (username)');
+
+    // OTP codes are stored hashed (per-code random salt), never in plaintext.
+    await execute('''
+      CREATE TABLE IF NOT EXISTS otp_codes (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        phone TEXT NOT NULL,
+        code_hash TEXT NOT NULL,
+        salt TEXT NOT NULL,
+        purpose TEXT NOT NULL DEFAULT 'auth',
+        expires_at TIMESTAMPTZ NOT NULL,
+        is_used BOOLEAN NOT NULL DEFAULT FALSE,
+        attempts INT NOT NULL DEFAULT 0,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      )
+    ''');
+    await execute('CREATE INDEX IF NOT EXISTS idx_otp_phone ON otp_codes (phone, purpose)');
+
+    await execute('''
+      CREATE TABLE IF NOT EXISTS messages (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        sender_id UUID NOT NULL,
+        receiver_id UUID NOT NULL,
+        message_type TEXT NOT NULL DEFAULT 'text',
+        content TEXT NOT NULL DEFAULT '',
+        file_path TEXT,
+        file_name TEXT,
+        file_size BIGINT,
+        media_type TEXT,
+        status TEXT NOT NULL DEFAULT 'sent',
+        encryption TEXT NOT NULL DEFAULT 'none',
+        cipher_type INT,
+        cipher_body TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      )
+    ''');
+    await execute(
+        'CREATE INDEX IF NOT EXISTS idx_messages_sender ON messages (sender_id, created_at DESC)');
+    await execute(
+        'CREATE INDEX IF NOT EXISTS idx_messages_receiver ON messages (receiver_id, created_at DESC)');
+    await execute(
+        'CREATE INDEX IF NOT EXISTS idx_messages_pair ON messages (sender_id, receiver_id, created_at DESC)');
+    await execute('CREATE INDEX IF NOT EXISTS idx_messages_file ON messages (file_path)');
+
+    // Metadata for Cloudinary-stored attachments. Bytes live in Cloudinary
+    // (uploaded as `type=authenticated`); delivery uses short-lived signed
+    // URLs minted after the authorization check.
+    await execute('''
+      CREATE TABLE IF NOT EXISTS files (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        owner_id UUID,
+        cloudinary_public_id TEXT NOT NULL,
+        delivery_path TEXT NOT NULL,
+        file_name TEXT NOT NULL,
+        file_size BIGINT NOT NULL,
+        media_type TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      )
+    ''');
+
+    await execute('''
+      CREATE TABLE IF NOT EXISTS keys (
+        user_id UUID NOT NULL,
+        device_id TEXT NOT NULL,
+        registration_id INT NOT NULL DEFAULT 0,
+        identity_key_public TEXT NOT NULL,
+        signed_prekey_id INT NOT NULL DEFAULT 0,
+        signed_prekey_public TEXT NOT NULL,
+        signed_prekey_signature TEXT NOT NULL,
+        one_time_prekeys JSONB NOT NULL DEFAULT '[]'::jsonb,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        PRIMARY KEY (user_id, device_id)
+      )
+    ''');
+
+    await execute('''
+      CREATE TABLE IF NOT EXISTS groups (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        name TEXT NOT NULL UNIQUE,
+        avatar_url TEXT,
+        creator_id UUID NOT NULL,
+        member_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      )
+    ''');
+
+    await execute('''
+      CREATE TABLE IF NOT EXISTS group_messages (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        group_id UUID NOT NULL,
+        sender_id UUID NOT NULL,
+        message_type TEXT NOT NULL DEFAULT 'text',
+        content TEXT NOT NULL DEFAULT '',
+        file_path TEXT,
+        file_name TEXT,
+        file_size BIGINT,
+        media_type TEXT,
+        status TEXT NOT NULL DEFAULT 'sent',
+        encryption TEXT NOT NULL DEFAULT 'none',
+        cipher_type INT,
+        cipher_body TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      )
+    ''');
+    await execute(
+        'CREATE INDEX IF NOT EXISTS idx_group_messages_group ON group_messages (group_id, created_at DESC)');
+    await execute(
+        'CREATE INDEX IF NOT EXISTS idx_group_messages_file ON group_messages (file_path)');
+
+    await execute('''
+      CREATE TABLE IF NOT EXISTS statuses (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id UUID NOT NULL,
+        text TEXT,
+        media_path TEXT,
+        media_type TEXT,
+        viewers JSONB NOT NULL DEFAULT '[]'::jsonb,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        expires_at TIMESTAMPTZ NOT NULL
+      )
+    ''');
+    await execute('CREATE INDEX IF NOT EXISTS idx_statuses_expiry ON statuses (expires_at)');
+    await execute('CREATE INDEX IF NOT EXISTS idx_statuses_user ON statuses (user_id)');
+
+    await execute('''
+      CREATE TABLE IF NOT EXISTS push_tokens (
+        token TEXT PRIMARY KEY,
+        user_id UUID NOT NULL,
+        platform TEXT NOT NULL DEFAULT 'android',
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      )
+    ''');
+    await execute('CREATE INDEX IF NOT EXISTS idx_push_tokens_user ON push_tokens (user_id)');
+  }
 
   Future<void> close() async {
-    await _database?.close();
-    _database = null;
-    print('MongoDB connection closed');
+    await _pool?.close();
+    _pool = null;
+    print('PostgreSQL connection closed');
   }
 }

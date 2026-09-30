@@ -1,8 +1,8 @@
 import 'dart:convert';
 import 'dart:math';
 
+import 'package:crypto/crypto.dart' as crypto;
 import 'package:http/http.dart' as http;
-import 'package:mongo_dart/mongo_dart.dart';
 
 import '../config/app_config.dart';
 import '../models/otp_code_model.dart';
@@ -11,6 +11,8 @@ import 'database_service.dart';
 class OtpService {
   final http.Client _client = http.Client();
   final DatabaseService _db = DatabaseService();
+
+  final Random _random = Random.secure();
 
   Future<Map<String, dynamic>> sendOtp({
     required String mobileNumber,
@@ -26,7 +28,7 @@ class OtpService {
 
     final queryParams = {
       'countryCode': countryCode.toString(),
-      'customerId': AppConfig.messageCentralCustomerId,
+      'customerId': AppConfig.messageCentralCustomerId ?? '',
       'senderId': 'UTOMOB',
       'type': 'SMS',
       'flowType': flowType ?? 'SMS',
@@ -43,7 +45,7 @@ class OtpService {
       final response = await _client.post(
         uri,
         headers: {
-          'authToken': AppConfig.messageCentralApiKey,
+          'authToken': AppConfig.messageCentralApiKey ?? '',
           'Content-Type': 'application/json',
         },
       );
@@ -88,7 +90,7 @@ class OtpService {
 
     final queryParams = {
       'countryCode': countryCode.toString(),
-      'customerId': AppConfig.messageCentralCustomerId,
+      'customerId': AppConfig.messageCentralCustomerId ?? '',
       'type': 'SMS',
       'mobileNumber': mobileNumber,
       'otpCode': otpCode,
@@ -103,7 +105,7 @@ class OtpService {
       final response = await _client.post(
         uri,
         headers: {
-          'authToken': AppConfig.messageCentralApiKey,
+          'authToken': AppConfig.messageCentralApiKey ?? '',
           'Content-Type': 'application/json',
         },
       );
@@ -135,28 +137,38 @@ class OtpService {
 
   Future<Map<String, dynamic>> _sendLocalOtp(String mobileNumber) async {
     try {
-      final random = Random.secure();
       final code = List.generate(
         AppConfig.otpLength,
-        (_) => random.nextInt(10),
+        (_) => _random.nextInt(10),
       ).join();
 
-      final otp = OtpCodeModel(
-        id: ObjectId(),
-        phone: mobileNumber,
-        code: code,
-        purpose: 'auth',
-        expiresAt:
-            DateTime.now().add(Duration(minutes: AppConfig.otpExpiryMinutes)),
-        isUsed: false,
-        createdAt: DateTime.now(),
-      );
+      // Store only a salted hash of the code — a database dump must not be
+      // replayable against the verification endpoint.
+      final salt = base64Url
+          .encode(List<int>.generate(16, (_) => _random.nextInt(256)))
+          .replaceAll('=', '');
+      final codeHash = _hashCode(salt, code);
 
-      await _db.otpCodes.insertOne(otp.toMap());
+      final expiresAt = DateTime.now()
+          .toUtc()
+          .add(Duration(minutes: AppConfig.otpExpiryMinutes));
+      final row = await _db.queryOne(
+        '''
+        INSERT INTO otp_codes (phone, code_hash, salt, purpose, expires_at)
+        VALUES (@phone, @code_hash, @salt, 'auth', @expires_at:timestamptz)
+        RETURNING id
+        ''',
+        parameters: {
+          'phone': mobileNumber,
+          'code_hash': codeHash,
+          'salt': salt,
+          'expires_at': expiresAt,
+        },
+      );
 
       return {
         'success': true,
-        'correlationId': otp.id.toHexString(),
+        'correlationId': row!['id'] as String,
         'message': 'OTP sent successfully',
         // Exposed only in dev mode so the client can autofill it.
         'dev_code': code,
@@ -175,24 +187,15 @@ class OtpService {
     required String correlationId,
   }) async {
     try {
-      final ObjectId otpId;
-      try {
-        otpId = ObjectId.fromHexString(correlationId);
-      } catch (_) {
-        return {
-          'success': false,
-          'verified': false,
-          'error': 'Invalid correlation ID',
-        };
-      }
+      final row = await _db.queryOne(
+        '''
+        SELECT * FROM otp_codes
+        WHERE id = @id:uuid AND phone = @phone AND purpose = 'auth'
+        ''',
+        parameters: {'id': correlationId, 'phone': mobileNumber},
+      );
 
-      final data = await _db.otpCodes.findOne({
-        '_id': otpId,
-        'phone': mobileNumber,
-        'purpose': 'auth',
-      });
-
-      if (data == null) {
+      if (row == null) {
         return {
           'success': false,
           'verified': false,
@@ -200,7 +203,7 @@ class OtpService {
         };
       }
 
-      final otp = OtpCodeModel.fromMap(data);
+      final otp = OtpCodeModel.fromMap(row);
 
       if (otp.isUsed) {
         return {
@@ -226,10 +229,10 @@ class OtpService {
         };
       }
 
-      if (otp.code != otpCode) {
-        await _db.otpCodes.updateOne(
-          where.eq('_id', otpId),
-          modify.set('attempts', otp.attempts + 1),
+      if (_hashCode(otp.salt, otpCode) != otp.codeHash) {
+        await _db.execute(
+          'UPDATE otp_codes SET attempts = attempts + 1 WHERE id = @id:uuid',
+          parameters: {'id': otp.id},
         );
         return {
           'success': false,
@@ -238,9 +241,9 @@ class OtpService {
         };
       }
 
-      await _db.otpCodes.updateOne(
-        where.eq('_id', otpId),
-        modify.set('is_used', true),
+      await _db.execute(
+        'UPDATE otp_codes SET is_used = TRUE WHERE id = @id:uuid',
+        parameters: {'id': otp.id},
       );
 
       return {
@@ -255,6 +258,10 @@ class OtpService {
         'error': 'Failed to verify OTP: $e',
       };
     }
+  }
+
+  static String _hashCode(String salt, String code) {
+    return crypto.sha256.convert(utf8.encode('$salt$code')).toString();
   }
 
   void dispose() {

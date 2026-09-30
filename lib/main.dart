@@ -18,9 +18,12 @@ import 'routes/file_routes.dart';
 import 'routes/group_routes.dart';
 import 'routes/key_routes.dart';
 import 'routes/push_routes.dart';
+import 'routes/rtc_routes.dart';
 import 'routes/status_routes.dart';
 import 'middleware/auth_middleware.dart';
 import 'middleware/rate_limit_middleware.dart';
+import 'services/user_service.dart';
+import 'utils/validate.dart';
 
 void main() async {
   await EnvConfig.load(path: _resolveEnvPath());
@@ -122,6 +125,7 @@ Handler _router(WebSocketService websocketService) {
   final groupRoutes = GroupRoutes();
   final statusRoutes = StatusRoutes();
   final pushRoutes = PushRoutes();
+  final rtcRoutes = RtcRoutes();
 
   // Wrap protected route handlers with auth middleware
   final protectedChatHandler = const Pipeline()
@@ -152,6 +156,11 @@ Handler _router(WebSocketService websocketService) {
       .addMiddleware(addAuthMiddleware)
       .addHandler(pushRoutes.router);
 
+  // WebRTC connection parameters require authentication.
+  final protectedRtcHandler = const Pipeline()
+      .addMiddleware(addAuthMiddleware)
+      .addHandler(rtcRoutes.router);
+
   // Auth profile routes are protected; OTP/refresh routes are public
   final protectedAuthHandler = const Pipeline()
       .addMiddleware(addAuthMiddleware)
@@ -170,7 +179,7 @@ Handler _router(WebSocketService websocketService) {
       .addHandler(authRoutes.publicRouter);
 
   final router = Router()
-    ..get('/ws', (Request request) {
+    ..get('/ws', (Request request) async {
       // WebSocket auth via subprotocol (token passed as second protocol) or Authorization header
       String? token;
 
@@ -214,6 +223,21 @@ Handler _router(WebSocketService websocketService) {
         );
       }
 
+      // Reject tokens for deleted users, matching the HTTP auth middleware.
+      if (!isValidUuid(userId)) {
+        return Response.unauthorized(
+          '{"error": "Invalid token payload"}',
+          headers: {'Content-Type': 'application/json'},
+        );
+      }
+      final userExists = await UserService().findUserById(userId);
+      if (userExists == null) {
+        return Response.unauthorized(
+          '{"error": "User not found"}',
+          headers: {'Content-Type': 'application/json'},
+        );
+      }
+
       return webSocketHandler((WebSocketChannel channel) {
         websocketService.handleConnection(channel, userId);
       })(request);
@@ -229,6 +253,7 @@ Handler _router(WebSocketService websocketService) {
     ..mount('/api/groups/', protectedGroupHandler)
     ..mount('/api/status/', protectedStatusHandler)
     ..mount('/api/push/', protectedPushHandler)
+    ..mount('/api/rtc/', protectedRtcHandler)
     ..get('/health', (Request request) => Response.ok('{"status": "ok"}'));
 
   return router.call;

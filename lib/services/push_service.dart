@@ -1,7 +1,6 @@
 import 'dart:convert';
 
 import 'package:http/http.dart' as http;
-import 'package:mongo_dart/mongo_dart.dart';
 
 import '../config/app_config.dart';
 import 'database_service.dart';
@@ -20,51 +19,52 @@ class PushService {
   // ---------------------------------------------------------------------------
 
   Future<void> registerToken({
-    required ObjectId userId,
+    required String userId,
     required String token,
     String platform = 'android',
   }) async {
     if (token.trim().isEmpty) return;
 
-    final existing = await _db.pushTokens.findOne({'token': token});
-    if (existing != null) {
-      // Same token may move between users (reinstall); re-attribute ownership.
-      await _db.pushTokens.updateOne(
-        where.eq('token', token),
-        modify
-            .set('user_id', userId)
-            .set('platform', platform)
-            .set('updated_at', DateTime.now()),
-      );
-      return;
-    }
-
-    await _db.pushTokens.insertOne({
-      '_id': ObjectId(),
-      'user_id': userId,
-      'token': token,
-      'platform': platform,
-      'updated_at': DateTime.now(),
-    });
+    await _db.execute(
+      '''
+      INSERT INTO push_tokens (token, user_id, platform, updated_at)
+      VALUES (@token, @user_id:uuid, @platform, now())
+      ON CONFLICT (token) DO UPDATE SET
+        user_id = EXCLUDED.user_id,
+        platform = EXCLUDED.platform,
+        updated_at = now()
+      ''',
+      parameters: {
+        'token': token,
+        'user_id': userId,
+        'platform': platform,
+      },
+    );
   }
 
   Future<void> unregisterToken(
-      {required ObjectId userId, required String token}) async {
-    await _db.pushTokens.deleteOne(
-      where.eq('token', token).eq('user_id', userId),
+      {required String userId, required String token}) async {
+    await _db.execute(
+      'DELETE FROM push_tokens WHERE token = @token AND user_id = @user_id:uuid',
+      parameters: {'token': token, 'user_id': userId},
     );
   }
 
   /// All FCM tokens belonging to [userId].
-  Future<List<String>> tokensForUser(ObjectId userId) async {
-    final docs =
-        await _db.pushTokens.find(where.eq('user_id', userId)).toList();
-    return docs.map((d) => d['token'] as String).toList();
+  Future<List<String>> tokensForUser(String userId) async {
+    final rows = await _db.query(
+      'SELECT token FROM push_tokens WHERE user_id = @user_id:uuid',
+      parameters: {'user_id': userId},
+    );
+    return rows.map((r) => r['token'] as String).toList();
   }
 
   /// Removes a token that FCM reported as invalid (expired/unregistered).
   Future<void> removeInvalidToken(String token) async {
-    await _db.pushTokens.deleteOne(where.eq('token', token));
+    await _db.execute(
+      'DELETE FROM push_tokens WHERE token = @token',
+      parameters: {'token': token},
+    );
   }
 
   // ---------------------------------------------------------------------------
@@ -74,7 +74,7 @@ class PushService {
   /// Sends a push notification to every device token registered to [userId].
   /// Returns false when FCM is not configured or the user has no tokens.
   Future<bool> sendToUser({
-    required ObjectId userId,
+    required String userId,
     required String title,
     required String body,
     Map<String, dynamic>? data,

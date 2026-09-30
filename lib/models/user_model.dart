@@ -1,13 +1,12 @@
-import 'package:mongo_dart/mongo_dart.dart';
-
-/// User model for MongoDB
-/// Represents a user in the SecureChat application
-/// Supports multiple login methods: phone, email/password, and Google sign-in
+/// User model backed by the Supabase `users` table.
+///
+/// Supports multiple login methods: phone, email/password, and Firebase
+/// (phone/email/Google) — each identifier column is nullable and unique.
 class UserModel {
-  final ObjectId id;
-  final String? phone; // Nullable - may not be available for all login methods
-  final String? email; // Nullable - email/password and Google login
-  final String? firebaseUid; // Firebase UID for cross-referencing users
+  final String id; // UUID
+  final String? phone;
+  final String? email;
+  final String? firebaseUid;
   final String? username;
   final String? displayName;
   final String? avatarUrl;
@@ -15,6 +14,7 @@ class UserModel {
   final String? passwordHash; // For email/password auth
   final String?
       phoneHash; // SHA-256 of canonical phone, used for contacts discovery
+  final String? currentRefreshJti; // Server-side refresh token revocation
   final Map<String, String> privacy; // last_seen / avatar / about
   final DateTime createdAt;
   final DateTime updatedAt;
@@ -32,6 +32,7 @@ class UserModel {
     this.about,
     this.passwordHash,
     this.phoneHash,
+    this.currentRefreshJti,
     this.privacy = const {
       'last_seen': 'everyone',
       'avatar': 'everyone',
@@ -43,10 +44,10 @@ class UserModel {
     this.lastSeen,
   });
 
-  /// Create UserModel from MongoDB document
+  /// Create UserModel from a Postgres row (column-name map).
   factory UserModel.fromMap(Map<String, dynamic> map) {
     return UserModel(
-      id: map['_id'] as ObjectId,
+      id: map['id'] as String,
       phone: map['phone'] as String?,
       email: map['email'] as String?,
       firebaseUid: map['firebase_uid'] as String?,
@@ -56,44 +57,26 @@ class UserModel {
       about: map['about'] as String?,
       passwordHash: map['password_hash'] as String?,
       phoneHash: map['phone_hash'] as String?,
-      privacy: (map['privacy'] as Map?)?.map(
-            (k, v) => MapEntry(k as String, v as String),
-          ) ??
-          const {},
-      createdAt: map['created_at'] as DateTime,
-      updatedAt: map['updated_at'] as DateTime,
+      currentRefreshJti: map['current_refresh_jti'] as String?,
+      privacy: _decodePrivacy(map['privacy']),
+      createdAt: (map['created_at'] as DateTime).toUtc(),
+      updatedAt: (map['updated_at'] as DateTime).toUtc(),
       isOnline: map['is_online'] as bool? ?? false,
-      lastSeen: map['last_seen'] as DateTime?,
+      lastSeen: (map['last_seen'] as DateTime?)?.toUtc(),
     );
   }
 
-  /// Convert UserModel to MongoDB document
-  Map<String, dynamic> toMap() {
-    final map = <String, dynamic>{
-      '_id': id,
-      'username': username,
-      'display_name': displayName,
-      'avatar_url': avatarUrl,
-      'about': about,
-      'password_hash': passwordHash,
-      'phone_hash': phoneHash,
-      'privacy': privacy,
-      'created_at': createdAt,
-      'updated_at': updatedAt,
-      'is_online': isOnline,
-      'last_seen': lastSeen,
-    };
-    // Only add nullable fields if they have values
-    if (phone != null) map['phone'] = phone;
-    if (email != null) map['email'] = email;
-    if (firebaseUid != null) map['firebase_uid'] = firebaseUid;
-    return map;
+  static Map<String, String> _decodePrivacy(dynamic raw) {
+    if (raw is Map) {
+      return raw.map((k, v) => MapEntry(k as String, v as String));
+    }
+    return const {};
   }
 
   /// Convert to JSON for API response
   Map<String, dynamic> toJson() {
     return {
-      'id': id.toHexString(),
+      'id': id,
       'phone': phone,
       'email': email,
       'firebase_uid': firebaseUid,
@@ -109,9 +92,26 @@ class UserModel {
     };
   }
 
+  /// Public projection for user search and contact discovery: omits phone
+  /// (unless explicitly included, e.g. contact matching where the requester
+  /// already knows the number), email, and Firebase identifiers.
+  Map<String, dynamic> toPublicJson({bool includePhone = false}) {
+    return {
+      if (includePhone && phone != null) 'phone': phone,
+      'id': id,
+      'username': username,
+      'display_name': displayName,
+      'avatar_url': avatarUrl,
+      'about': about,
+      'created_at': createdAt.toIso8601String(),
+      'is_online': isOnline,
+      'last_seen': lastSeen?.toIso8601String(),
+    };
+  }
+
   /// Create a copy with updated fields
   UserModel copyWith({
-    ObjectId? id,
+    String? id,
     String? phone,
     String? email,
     String? firebaseUid,
@@ -121,6 +121,7 @@ class UserModel {
     String? about,
     String? passwordHash,
     String? phoneHash,
+    String? currentRefreshJti,
     Map<String, String>? privacy,
     DateTime? createdAt,
     DateTime? updatedAt,
@@ -138,6 +139,7 @@ class UserModel {
       about: about ?? this.about,
       passwordHash: passwordHash ?? this.passwordHash,
       phoneHash: phoneHash ?? this.phoneHash,
+      currentRefreshJti: currentRefreshJti ?? this.currentRefreshJti,
       privacy: privacy ?? this.privacy,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,

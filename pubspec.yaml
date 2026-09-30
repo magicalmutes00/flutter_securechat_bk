@@ -10,7 +10,7 @@ dependencies:
   shelf: ^1.4.1
   shelf_router: ^1.1.4
   shelf_web_socket: ^1.0.4
-  mongo_dart: ^0.10.3
+  postgres: ^3.4.0
   json_annotation: ^4.8.1
   json_serializable: ^6.7.1
   build_runner: ^2.4.7

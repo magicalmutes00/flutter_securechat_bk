@@ -52,6 +52,12 @@ class EnvConfig {
     }
     return value;
   }
+
+  /// Test hook: seeds a value without touching the process environment.
+  /// Values set here take precedence over everything else.
+  static void setForTesting(String key, String value) {
+    _env[key] = value;
+  }
 }
 
 class EnvironmentError extends Error {
