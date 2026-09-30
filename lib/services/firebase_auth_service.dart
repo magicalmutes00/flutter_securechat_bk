@@ -38,9 +38,18 @@ class FirebaseAuthService {
       throw FirebaseAuthException('Malformed token');
     }
 
-    final headerJson =
-        utf8.decode(base64Url.decode(base64Url.normalize(parts[0])));
-    final header = jsonDecode(headerJson) as Map<String, dynamic>;
+    // Malformed base64/JSON in the header is a client error, not a server
+    // fault — normalize it to the same 401 path as every other bad token.
+    final Map<String, dynamic> header;
+    try {
+      final headerJson =
+          utf8.decode(base64Url.decode(base64Url.normalize(parts[0])));
+      header = jsonDecode(headerJson) as Map<String, dynamic>;
+    } on FormatException {
+      throw FirebaseAuthException('Malformed token');
+    } on ArgumentError {
+      throw FirebaseAuthException('Malformed token');
+    }
     final kid = header['kid'] as String?;
     if (kid == null) {
       throw FirebaseAuthException('Token header missing kid');
