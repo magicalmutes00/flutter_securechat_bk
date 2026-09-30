@@ -12,6 +12,8 @@ RUN dart pub get --offline && \
     dart compile exe lib/main.dart -o /app/server
 
 # --- Runtime stage ---
+# The Postgres driver and Cloudinary uploads need no native libs and no local
+# writable storage, so the runtime image stays minimal.
 FROM debian:bookworm-slim
 
 RUN apt-get update && \
@@ -20,15 +22,14 @@ RUN apt-get update && \
 
 WORKDIR /app
 
-# Runtime deps (mongo driver uses no native libs; keep image small).
 COPY --from=build /app/server /app/server
 
-# .env is mounted from the host; create a writable uploads dir.
-RUN mkdir -p /app/uploads && \
-    chown -R nobody:nogroup /app
+RUN chown -R nobody:nogroup /app
 
 USER nobody
 
+# Render injects PORT (default 10000) and the server picks it up when
+# SERVER_PORT is unset; 8080 is the local/docker default.
 EXPOSE 8080
 
 CMD ["/app/server"]

@@ -1,17 +1,31 @@
+# Local development stack for SecureChat.
+#
+# The server stores data in PostgreSQL (Supabase in production — the schema is
+# created idempotently on startup, so a plain postgres container works for
+# local runs) and uploads attachments to Cloudinary. Secrets come from .env;
+# SUPABASE_DB_URL is overridden below to point at the local postgres.
+#
+# For deployment on Render, see render.yaml — Render builds the same
+# Dockerfile and takes env vars from its dashboard (it does not run compose).
+
 services:
-  mongo:
-    image: mongo:7
+  postgres:
+    image: postgres:16-alpine
     restart: unless-stopped
+    environment:
+      POSTGRES_USER: securechat
+      POSTGRES_PASSWORD: securechat
+      POSTGRES_DB: securechat
     volumes:
-      - mongo_data:/data/db
+      - pg_data:/var/lib/postgresql/data
     ports:
-      - "27017:27017"
+      - "5432:5432"
     healthcheck:
-      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      test: ["CMD-SHELL", "pg_isready -U securechat -d securechat"]
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 20s
+      start_period: 10s
 
   securechat-backend:
     build: .
@@ -19,27 +33,24 @@ services:
     env_file:
       - .env
     environment:
-      MONGO_HOST: mongo
-      MONGO_PORT: 27017
-      MONGO_CONNECTION_STRING: mongodb://mongo:27017/securechat
-      # Expose the health endpoint unencrypted on 8080; TLS terminates in a
-      # reverse proxy (e.g. Caddy/nginx) for production.
+      # Local database — overrides the Supabase URL from .env.
+      SUPABASE_DB_URL: postgresql://securechat:securechat@postgres:5432/securechat
       SERVER_HOST: 0.0.0.0
       SERVER_PORT: 8080
+      # Behind a reverse proxy the client IP arrives via X-Forwarded-For.
+      RATE_LIMIT_TRUST_PROXY: "true"
     ports:
       - "8080:8080"
-    volumes:
-      - uploads_data:/app/uploads
     depends_on:
-      mongo:
+      postgres:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "sh", "-c", "wget -qO- http://127.0.0.1:8080/health || exit 1"]
+      # bash /dev/tcp probe: the slim runtime image ships no curl/wget.
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8080"]
       interval: 30s
       timeout: 5s
       retries: 5
       start_period: 15s
 
 volumes:
-  mongo_data:
-  uploads_data:
+  pg_data:

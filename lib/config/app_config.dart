@@ -8,8 +8,12 @@ class AppConfig {
 
   // Server Configuration
   static String get serverHost => EnvConfig.get('SERVER_HOST') ?? '0.0.0.0';
+  // PaaS platforms (Render, Fly, Heroku) inject the listening port as PORT;
+  // SERVER_PORT takes precedence for local/docker setups.
   static int get serverPort =>
-      int.tryParse(EnvConfig.get('SERVER_PORT') ?? '8080') ?? 8080;
+      int.tryParse(
+          EnvConfig.get('SERVER_PORT') ?? EnvConfig.get('PORT') ?? '8080') ??
+      8080;
   static String get serverBaseUrl =>
       EnvConfig.get('SERVER_BASE_URL') ?? 'http://192.168.1.14:8081';
 

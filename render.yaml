@@ -1,0 +1,67 @@
+# Render Blueprint — SecureChat backend
+#
+# Deploy: Render dashboard → New → Blueprint → pick the
+# magicalmutes00/flutter_securechat_bk repo; Render reads this file.
+#
+# Render builds the backend Dockerfile and runs one web service. It does NOT
+# use docker-compose (that file is for local development only).
+#
+# Required secrets are marked `sync: false` — you'll be prompted to fill them
+# in on first deploy. Values live in Render's dashboard afterwards.
+#
+# Data: point SUPABASE_DB_URL at your Supabase Postgres (session pooler URI,
+# port 5432). The schema is created automatically on first boot. To use a
+# Render-managed Postgres instead, uncomment the `databases` block at the
+# bottom and delete the SUPABASE_DB_URL entry below.
+#
+# Notes:
+# - WebSocket (`/ws`) works out of the box on Render web services; clients
+#   connect to wss://<service-name>.onrender.com/ws.
+# - Free-plan services sleep after ~15 minutes idle; expect a ~30s cold start
+#   and reconnects (the mobile app's WebSocket backoff handles this).
+# - Every request arrives through Render's proxy, so rate limiting keys on
+#   X-Forwarded-For — hence RATE_LIMIT_TRUST_PROXY=true.
+
+services:
+  - type: web
+    name: securechat-backend
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    plan: free
+    region: oregon
+    healthCheckPath: /health
+    autoDeploy: true
+    # Render injects PORT (10000 by default); the server reads it when
+    # SERVER_PORT is unset, so no port configuration is needed here.
+    envVars:
+      - key: RATE_LIMIT_TRUST_PROXY
+        value: "true"
+      - key: JWT_SECRET
+        generateValue: true
+      - key: SUPABASE_DB_URL
+        sync: false
+      - key: CLOUDINARY_CLOUD_NAME
+        sync: false
+      - key: CLOUDINARY_API_KEY
+        sync: false
+      - key: CLOUDINARY_API_SECRET
+        sync: false
+      - key: FIREBASE_PROJECT_ID
+        sync: false
+      # Optional — needed only for reliable calls behind symmetric NAT.
+      - key: TURN_SERVER_URL
+        sync: false
+      - key: TURN_USERNAME
+        sync: false
+      - key: TURN_CREDENTIAL
+        sync: false
+
+# Optional: Render-managed Postgres instead of Supabase. Uncommenting this
+# provisions a database and automatically injects its internal connection
+# string as SUPABASE_DB_URL on the web service.
+#
+# databases:
+#   - name: securechat-db
+#     databaseName: securechat
+#     plan: basic-256mb
