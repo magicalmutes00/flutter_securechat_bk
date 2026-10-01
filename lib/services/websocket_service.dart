@@ -68,6 +68,9 @@ class WebSocketService {
         case 'read':
           _handleReadReceipt(data, readerUserId: authenticatedUserId);
           break;
+        case 'reset_session':
+          _handleResetSession(data, authenticatedUserId: authenticatedUserId);
+          break;
         case 'delivered':
           _handleDeliveryReceipt(data, receiverUserId: authenticatedUserId);
           break;
@@ -305,6 +308,23 @@ class WebSocketService {
       'type': 'typing',
       'sender_id': authenticatedUserId,
       'is_typing': data['is_typing'] ?? true,
+    });
+  }
+
+  /// Relays a "your messages don't decrypt on my side, drop your session
+  /// with me" request. Same trust shape as typing: the sender is the
+  /// authenticated connection owner, the payload carries no content, and a
+  /// malicious peer can at worst force an extra X3DH round trip.
+  void _handleResetSession(
+    Map<String, dynamic> data, {
+    required String? authenticatedUserId,
+  }) {
+    if (authenticatedUserId == null) return;
+    final receiverId = data['receiver_id'] as String?;
+    if (receiverId == null || !isValidUuid(receiverId)) return;
+    _sendToUser(receiverId, {
+      'type': 'reset_session',
+      'sender_id': authenticatedUserId,
     });
   }
 
