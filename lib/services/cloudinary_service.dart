@@ -57,6 +57,12 @@ class CloudinaryService {
   String get _apiSecret => AppConfig.cloudinaryApiSecret;
 
   /// Uploads [bytes] as a private asset and returns where to find it.
+  ///
+  /// Always uses the `raw` resource type: attachments are AES-GCM ciphertext
+  /// (the original extension is kept only for the server's allow-list), and
+  /// the `/auto` endpoint rejects them with "Invalid image file" after trying
+  /// to content-sniff random bytes as media. The client decrypts raw bytes
+  /// locally, so no Cloudinary transformation is ever needed.
   Future<CloudinaryUploadResult> upload({
     required List<int> bytes,
     required String filename,
@@ -73,7 +79,7 @@ class CloudinaryService {
 
     final request = http.MultipartRequest(
       'POST',
-      Uri.parse('https://api.cloudinary.com/v1_1/$_cloudName/auto/upload'),
+      Uri.parse('https://api.cloudinary.com/v1_1/$_cloudName/raw/upload'),
     )
       ..fields['public_id'] = publicId
       ..fields['timestamp'] = timestamp
