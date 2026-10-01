@@ -1,12 +1,16 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:shelf/shelf.dart';
 import 'package:shelf_router/shelf_router.dart';
+import '../middleware/request_id_middleware.dart';
+import '../services/file_service.dart';
 import '../utils/validate.dart';
 import '../services/status_service.dart';
 import '../services/user_service.dart';
 import '../utils/api_responses.dart';
 
 class StatusRoutes {
+  final FileService _fileService = FileService();
   final StatusService _statusService = StatusService();
   final UserService _userService = UserService();
 
@@ -125,6 +129,7 @@ class StatusRoutes {
   }
 
   Future<Response> _deleteStatus(Request request, String id) async {
+    final requestId = requestIdOf(request);
     try {
       final userId = _currentUserId(request);
       if (userId == null) {
@@ -157,6 +162,25 @@ class StatusRoutes {
       }
 
       await _statusService.deleteStatus(id, userId);
+
+      // Best-effort orphan cleanup, same contract as message deletes: the
+      // row is gone, so an unreferenced asset can go too. Never fails the
+      // delete.
+      final mediaPath = status.mediaPath;
+      if (mediaPath != null && mediaPath.startsWith('/api/files/')) {
+        final fileId = mediaPath.substring('/api/files/'.length);
+        if (isValidUuid(fileId)) {
+          try {
+            await _fileService.deleteIfUnreferenced(
+              fileId: fileId,
+              ownerId: userId,
+            );
+          } catch (e) {
+            stderr.writeln(
+                'Orphan status file cleanup failed [request $requestId]: $e');
+          }
+        }
+      }
 
       return Response.ok(
         jsonEncode({'success': true}),

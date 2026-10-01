@@ -1,6 +1,9 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:shelf/shelf.dart';
 import 'package:shelf_router/shelf_router.dart';
+import '../middleware/request_id_middleware.dart';
+import '../services/file_service.dart';
 import '../services/message_service.dart';
 import '../services/user_service.dart';
 import '../utils/api_responses.dart';
@@ -8,6 +11,7 @@ import '../utils/validate.dart';
 import '../config/app_config.dart';
 
 class ChatRoutes {
+  final FileService _fileService = FileService();
   final MessageService _messageService = MessageService();
   final UserService _userService = UserService();
 
@@ -272,6 +276,7 @@ class ChatRoutes {
   }
 
   Future<Response> _deleteMessage(Request request, String messageId) async {
+    final requestId = requestIdOf(request);
     try {
       final currentUserId = request.context['userId'] as String?;
       if (currentUserId == null) {
@@ -305,6 +310,25 @@ class ChatRoutes {
       }
 
       await _messageService.deleteMessage(messageId);
+
+      // Best-effort orphan cleanup: the row is gone, so an unreferenced
+      // asset can go too. Never fails the delete — a Cloudinary hiccup
+      // leaves the row for a later manual DELETE /api/files/<id>.
+      final filePath = message.filePath;
+      if (filePath != null && filePath.startsWith('/api/files/')) {
+        final fileId = filePath.substring('/api/files/'.length);
+        if (isValidUuid(fileId)) {
+          try {
+            await _fileService.deleteIfUnreferenced(
+              fileId: fileId,
+              ownerId: currentUserId,
+            );
+          } catch (e) {
+            stderr.writeln(
+                'Orphan file cleanup failed [request $requestId]: $e');
+          }
+        }
+      }
 
       return Response.ok(
         jsonEncode({'success': true}),

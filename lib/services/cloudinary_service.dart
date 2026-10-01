@@ -116,6 +116,50 @@ class CloudinaryService {
     }
   }
 
+  /// Deletes the asset [publicId] of [resourceType] (`image`/`video` for
+  /// legacy media-sniffed uploads, `raw` for current opaque uploads).
+  /// Signed with the API secret like uploads. Returns true when Cloudinary
+  /// reports the asset deleted — or already absent, which is success for
+  /// idempotent cleanup paths.
+  Future<bool> destroy({
+    required String publicId,
+    required String resourceType,
+  }) async {
+    final timestamp =
+        (DateTime.now().millisecondsSinceEpoch ~/ 1000).toString();
+
+    // Destroy signs every parameter except api_key. Sorted alphabetically:
+    // public_id, resource_type, timestamp, type.
+    final toSign = 'public_id=$publicId&resource_type=$resourceType'
+        '&timestamp=$timestamp&type=authenticated$_apiSecret';
+    final signature = crypto.sha1.convert(utf8.encode(toSign)).toString();
+
+    final response = await http
+        .post(
+          Uri.parse(
+              'https://api.cloudinary.com/v1_1/$_cloudName/$resourceType/destroy'),
+          body: {
+            'public_id': publicId,
+            'resource_type': resourceType,
+            'timestamp': timestamp,
+            'type': 'authenticated',
+            'api_key': _apiKey,
+            'signature': signature,
+          },
+        )
+        .timeout(const Duration(seconds: 30));
+    final decoded = jsonDecode(response.body) as Map<String, dynamic>;
+
+    if (response.statusCode != 200) {
+      final error = decoded['error'];
+      final message = error is Map ? error['message'] : 'destroy failed';
+      throw CloudinaryException('Cloudinary destroy failed: $message');
+    }
+
+    final result = decoded['result'] as String?;
+    return result == 'ok' || result == 'not found';
+  }
+
   /// Mints a signed delivery URL for a stored [deliveryPath].
   ///
   /// Signature = first 8 chars of URL-safe base64(SHA1(path + api_secret)).

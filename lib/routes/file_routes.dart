@@ -8,6 +8,7 @@ import '../config/app_config.dart';
 import '../middleware/request_id_middleware.dart';
 import '../services/cloudinary_service.dart';
 import '../services/database_service.dart';
+import '../services/file_service.dart';
 import '../services/group_service.dart';
 import '../services/message_service.dart';
 import '../services/status_service.dart';
@@ -17,6 +18,7 @@ import '../utils/validate.dart';
 
 class FileRoutes {
   final CloudinaryService _cloudinaryService = CloudinaryService();
+  final FileService _fileService = FileService();
   final MessageService _messageService = MessageService();
   final GroupService _groupService = GroupService();
   final StatusService _statusService = StatusService();
@@ -29,7 +31,8 @@ class FileRoutes {
     ..post('/upload/video', _uploadVideo)
     ..post('/upload/audio', _uploadAudio)
     ..post('/upload/document', _uploadDocument)
-    ..get('/<fileId>', _getFile);
+    ..get('/<fileId>', _getFile)
+    ..delete('/<fileId>', _deleteFile);
 
   Future<Response> _uploadImage(Request request) async {
     return _uploadFile(request, 'image');
@@ -276,6 +279,55 @@ class FileRoutes {
         e,
         requestId: requestId,
         code: 'download_failed',
+      );
+    }
+  }
+
+  Future<Response> _deleteFile(Request request, String fileId) async {
+    final requestId = requestIdOf(request);
+    try {
+      final userId = request.context['userId'] as String?;
+      if (userId == null) {
+        return clientError(
+          401,
+          message: 'Unauthorized',
+          code: 'unauthorized',
+          requestId: requestId,
+        );
+      }
+
+      if (!isValidUuid(fileId)) {
+        return clientError(
+          400,
+          message: 'Invalid file ID format',
+          code: 'invalid_file_id',
+          requestId: requestId,
+        );
+      }
+
+      final deleted = await _fileService.deleteIfUnreferenced(
+        fileId: fileId,
+        ownerId: userId,
+      );
+      if (!deleted) {
+        return clientError(
+          404,
+          message: 'File not found or still in use',
+          code: 'not_deletable',
+          requestId: requestId,
+        );
+      }
+
+      return Response.ok(
+        jsonEncode({'success': true}),
+        headers: {'Content-Type': 'application/json'},
+      );
+    } catch (e) {
+      return serverError(
+        'Failed to delete file',
+        e,
+        requestId: requestId,
+        code: 'delete_failed',
       );
     }
   }
