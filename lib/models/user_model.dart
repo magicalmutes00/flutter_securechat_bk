@@ -15,6 +15,8 @@ class UserModel {
   final String?
       phoneHash; // SHA-256 of canonical phone, used for contacts discovery
   final String? currentRefreshJti; // Server-side refresh token revocation
+  final String? prevRefreshJti; // Previous jti, briefly acceptable (rotation grace)
+  final DateTime? prevRefreshJtiSetAt;
   final Map<String, String> privacy; // last_seen / avatar / about
   final DateTime createdAt;
   final DateTime updatedAt;
@@ -33,6 +35,8 @@ class UserModel {
     this.passwordHash,
     this.phoneHash,
     this.currentRefreshJti,
+    this.prevRefreshJti,
+    this.prevRefreshJtiSetAt,
     this.privacy = const {
       'last_seen': 'everyone',
       'avatar': 'everyone',
@@ -58,6 +62,9 @@ class UserModel {
       passwordHash: map['password_hash'] as String?,
       phoneHash: map['phone_hash'] as String?,
       currentRefreshJti: map['current_refresh_jti'] as String?,
+      prevRefreshJti: map['prev_refresh_jti'] as String?,
+      prevRefreshJtiSetAt:
+          (map['prev_refresh_jti_set_at'] as DateTime?)?.toUtc(),
       privacy: _decodePrivacy(map['privacy']),
       createdAt: (map['created_at'] as DateTime).toUtc(),
       updatedAt: (map['updated_at'] as DateTime).toUtc(),
@@ -122,6 +129,8 @@ class UserModel {
     String? passwordHash,
     String? phoneHash,
     String? currentRefreshJti,
+    String? prevRefreshJti,
+    DateTime? prevRefreshJtiSetAt,
     Map<String, String>? privacy,
     DateTime? createdAt,
     DateTime? updatedAt,
@@ -140,6 +149,8 @@ class UserModel {
       passwordHash: passwordHash ?? this.passwordHash,
       phoneHash: phoneHash ?? this.phoneHash,
       currentRefreshJti: currentRefreshJti ?? this.currentRefreshJti,
+      prevRefreshJti: prevRefreshJti ?? this.prevRefreshJti,
+      prevRefreshJtiSetAt: prevRefreshJtiSetAt ?? this.prevRefreshJtiSetAt,
       privacy: privacy ?? this.privacy,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,

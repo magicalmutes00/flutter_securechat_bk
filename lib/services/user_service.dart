@@ -312,10 +312,25 @@ class UserService {
 
   /// Stores the jti of the only refresh token allowed to rotate the session.
   /// Minting a new refresh token overwrites this, invalidating every older
-  /// one (single active refresh session per user).
+  /// one (single active refresh session per user). A fresh login also clears
+  /// any rotation-grace state: the new session supersedes everything prior.
   Future<void> setCurrentRefreshJti(String userId, String jti) async {
     await _db.execute(
-      'UPDATE users SET current_refresh_jti = @jti WHERE id = @id:uuid',
+      'UPDATE users SET current_refresh_jti = @jti, prev_refresh_jti = NULL, '
+      'prev_refresh_jti_set_at = NULL WHERE id = @id:uuid',
+      parameters: {'jti': jti, 'id': userId},
+    );
+  }
+
+  /// Rotates forward: the outgoing jti becomes the grace-accepted previous
+  /// one (timestamped), and [jti] becomes current. A client killed between
+  /// the server's rotation and its own storage write can still present the
+  /// previous token once, instead of being signed out.
+  Future<void> rotateRefreshJti(String userId, String jti) async {
+    await _db.execute(
+      'UPDATE users SET prev_refresh_jti = current_refresh_jti, '
+      'prev_refresh_jti_set_at = now(), current_refresh_jti = @jti '
+      'WHERE id = @id:uuid',
       parameters: {'jti': jti, 'id': userId},
     );
   }

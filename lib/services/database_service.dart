@@ -130,6 +130,14 @@ class DatabaseService {
       )
     ''');
     await execute('CREATE INDEX IF NOT EXISTS idx_users_username ON users (username)');
+    // Rotation grace: the previously-current refresh jti stays acceptable for
+    // a few minutes so a client killed mid-rotation (new pair issued, old
+    // pair still stored) can retry with the old token instead of being
+    // signed out. Idempotent on every boot, like the other ALTERs.
+    await execute(
+        'ALTER TABLE users ADD COLUMN IF NOT EXISTS prev_refresh_jti TEXT');
+    await execute(
+        'ALTER TABLE users ADD COLUMN IF NOT EXISTS prev_refresh_jti_set_at TIMESTAMPTZ');
 
     // OTP codes are stored hashed (per-code random salt), never in plaintext.
     await execute('''

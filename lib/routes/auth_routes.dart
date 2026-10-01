@@ -11,6 +11,11 @@ import '../utils/api_responses.dart';
 import '../utils/validate.dart';
 
 class AuthRoutes {
+  /// How long a superseded refresh token stays acceptable, covering clients
+  /// killed mid-rotation. Short on purpose: just long enough for the client's
+  /// retry, never a second session.
+  static const int _refreshGraceMinutes = 10;
+
   final UserService _userService = UserService();
   final JwtService _jwtService = JwtService();
   final OtpService _otpService = OtpService();
@@ -80,10 +85,22 @@ class AuthRoutes {
         );
       }
 
+      // Rotation grace: a client killed between the server's rotation and
+      // its own storage write still holds the previous token. Accept it
+      // briefly so that client converges instead of being signed out.
+      // Anything older than the grace window (or a token after logout, when
+      // both columns are NULL) is still rejected.
       final tokenJti = payload['jti'] as String?;
-      if (tokenJti == null ||
-          user.currentRefreshJti == null ||
-          user.currentRefreshJti != tokenJti) {
+      final isCurrent =
+          tokenJti != null && user.currentRefreshJti == tokenJti;
+      final prevSetAt = user.prevRefreshJtiSetAt;
+      final isGracedPrevious = tokenJti != null &&
+          user.prevRefreshJti != null &&
+          user.prevRefreshJti == tokenJti &&
+          prevSetAt != null &&
+          DateTime.now().toUtc().difference(prevSetAt).inMinutes <
+              _refreshGraceMinutes;
+      if (!isCurrent && !isGracedPrevious) {
         return Response.unauthorized(
           jsonEncode({
             'error': 'Refresh token has been revoked',
@@ -103,7 +120,7 @@ class AuthRoutes {
 
       final newJti = _jwtService.getJwtId(tokens['refresh_token']!);
       if (newJti != null) {
-        await _userService.setCurrentRefreshJti(userId, newJti);
+        await _userService.rotateRefreshJti(userId, newJti);
       }
 
       return Response.ok(
