@@ -5,12 +5,14 @@ import 'package:shelf/shelf.dart';
 import 'package:shelf_router/shelf_router.dart';
 
 import '../config/app_config.dart';
+import '../middleware/request_id_middleware.dart';
 import '../services/cloudinary_service.dart';
 import '../services/database_service.dart';
 import '../services/group_service.dart';
 import '../services/message_service.dart';
 import '../services/status_service.dart';
 import '../utils/api_responses.dart';
+import '../utils/file_validation.dart';
 import '../utils/validate.dart';
 
 class FileRoutes {
@@ -46,31 +48,35 @@ class FileRoutes {
   }
 
   Future<Response> _uploadFile(Request request, String type) async {
+    final requestId = requestIdOf(request);
     try {
       final userId = request.context['userId'] as String?;
       if (userId == null) {
-        return Response.unauthorized(
-          jsonEncode({'error': 'Unauthorized'}),
-          headers: {'Content-Type': 'application/json'},
+        return clientError(
+          401,
+          message: 'Unauthorized',
+          code: 'unauthorized',
+          requestId: requestId,
         );
       }
 
       final contentType = request.headers['content-type'] ?? '';
       if (!contentType.contains('multipart/form-data')) {
-        return Response(
+        return clientError(
           400,
-          body: jsonEncode(
-              {'error': 'Invalid content type. Expected multipart/form-data'}),
-          headers: {'Content-Type': 'application/json'},
+          message: 'Invalid content type. Expected multipart/form-data',
+          code: 'invalid_content_type',
+          requestId: requestId,
         );
       }
 
       final boundary = _boundaryFromContentType(contentType);
       if (boundary == null || boundary.isEmpty) {
-        return Response(
+        return clientError(
           400,
-          body: jsonEncode({'error': 'Missing multipart boundary'}),
-          headers: {'Content-Type': 'application/json'},
+          message: 'Missing multipart boundary',
+          code: 'missing_boundary',
+          requestId: requestId,
         );
       }
 
@@ -79,10 +85,11 @@ class FileRoutes {
       final declaredLength =
           int.tryParse(request.headers['content-length'] ?? '');
       if (declaredLength != null && declaredLength > maxFileSizeBytes + 65536) {
-        return Response(
+        return clientError(
           413,
-          body: jsonEncode({'error': 'File size exceeds maximum allowed size'}),
-          headers: {'Content-Type': 'application/json'},
+          message: 'File size exceeds maximum allowed size',
+          code: 'file_too_large',
+          requestId: requestId,
         );
       }
 
@@ -90,18 +97,20 @@ class FileRoutes {
 
       final part = _extractMultipartFile(bytes, boundary);
       if (part == null || part.bytes.isEmpty) {
-        return Response(
+        return clientError(
           400,
-          body: jsonEncode({'error': 'No file provided'}),
-          headers: {'Content-Type': 'application/json'},
+          message: 'No file provided',
+          code: 'no_file',
+          requestId: requestId,
         );
       }
 
       if (part.bytes.length > maxFileSizeBytes) {
-        return Response(
+        return clientError(
           413,
-          body: jsonEncode({'error': 'File size exceeds maximum allowed size'}),
-          headers: {'Content-Type': 'application/json'},
+          message: 'File size exceeds maximum allowed size',
+          code: 'file_too_large',
+          requestId: requestId,
         );
       }
 
@@ -111,12 +120,13 @@ class FileRoutes {
           p.basename(part.filename.replaceAll('\\', '/')).trim();
       final safeName = originalName.isEmpty ? 'file' : originalName;
 
-      final validationError = _validateFile(safeName, part.bytes, type);
+      final validationError = validateUploadFile(safeName, part.bytes, type);
       if (validationError != null) {
-        return Response(
+        return clientError(
           400,
-          body: jsonEncode({'success': false, 'message': validationError}),
-          headers: {'Content-Type': 'application/json'},
+          message: validationError.message,
+          code: validationError.code,
+          requestId: requestId,
         );
       }
 
@@ -164,50 +174,34 @@ class FileRoutes {
         headers: {'Content-Type': 'application/json'},
       );
     } catch (e) {
-      return serverError('Failed to upload file', e);
+      return serverError(
+        'Failed to upload file',
+        e,
+        requestId: requestId,
+        code: 'upload_failed',
+      );
     }
-  }
-
-  /// Extension allow-list plus a content sniff: the first 512 bytes must not
-  /// contradict the claimed extension. Unidentifiable content
-  /// (application/octet-stream) is allowed — that is what end-to-end
-  /// encrypted attachments look like; their keys travel in the message.
-  String? _validateFile(String filename, List<int> bytes, String type) {
-    final extensions = AppConfig.allowedFileExtensions[type];
-    if (extensions == null) return 'Invalid file type category';
-
-    final extension =
-        p.extension(filename).toLowerCase().replaceFirst('.', '');
-    if (!extensions.contains(extension)) {
-      return 'File extension not allowed for $type';
-    }
-
-    final detectedType = lookupMimeType(filename, headerBytes: bytes);
-    final claimedType = lookupMimeType('x.$extension');
-    if (detectedType != null &&
-        claimedType != null &&
-        detectedType != 'application/octet-stream' &&
-        detectedType != claimedType) {
-      return 'File content does not match its extension';
-    }
-    return null;
   }
 
   Future<Response> _getFile(Request request, String fileId) async {
+    final requestId = requestIdOf(request);
     try {
       final userId = request.context['userId'] as String?;
       if (userId == null) {
-        return Response.unauthorized(
-          jsonEncode({'error': 'Unauthorized'}),
-          headers: {'Content-Type': 'application/json'},
+        return clientError(
+          401,
+          message: 'Unauthorized',
+          code: 'unauthorized',
+          requestId: requestId,
         );
       }
 
       if (!isValidUuid(fileId)) {
-        return Response(
+        return clientError(
           400,
-          body: jsonEncode({'error': 'Invalid file ID format'}),
-          headers: {'Content-Type': 'application/json'},
+          message: 'Invalid file ID format',
+          code: 'invalid_file_id',
+          requestId: requestId,
         );
       }
 
@@ -246,9 +240,11 @@ class FileRoutes {
           !isGroupAuthorized &&
           !isStatusAuthorized &&
           !isAvatarAuthorized) {
-        return Response.forbidden(
-          jsonEncode({'error': 'Not authorized to access this file'}),
-          headers: {'Content-Type': 'application/json'},
+        return clientError(
+          403,
+          message: 'Not authorized to access this file',
+          code: 'forbidden',
+          requestId: requestId,
         );
       }
 
@@ -257,9 +253,11 @@ class FileRoutes {
         parameters: {'id': fileId},
       );
       if (row == null) {
-        return Response.notFound(
-          jsonEncode({'error': 'File not found'}),
-          headers: {'Content-Type': 'application/json'},
+        return clientError(
+          404,
+          message: 'File not found',
+          code: 'not_found',
+          requestId: requestId,
         );
       }
 
@@ -273,7 +271,12 @@ class FileRoutes {
         headers: {'Cache-Control': 'private, max-age=3600'},
       );
     } catch (e) {
-      return serverError('Failed to get file', e);
+      return serverError(
+        'Failed to get file',
+        e,
+        requestId: requestId,
+        code: 'download_failed',
+      );
     }
   }
 

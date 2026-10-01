@@ -22,6 +22,7 @@ import 'routes/rtc_routes.dart';
 import 'routes/status_routes.dart';
 import 'middleware/auth_middleware.dart';
 import 'middleware/rate_limit_middleware.dart';
+import 'middleware/request_id_middleware.dart';
 import 'services/user_service.dart';
 import 'utils/validate.dart';
 
@@ -34,6 +35,7 @@ void main() async {
   final websocketService = WebSocketService();
 
   final handler = const Pipeline()
+      .addMiddleware(requestIdMiddleware())
       .addMiddleware(logRequests())
       .addMiddleware(_corsMiddleware())
       .addHandler(_router(websocketService));
