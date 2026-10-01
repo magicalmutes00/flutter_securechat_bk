@@ -17,11 +17,13 @@ class GroupMessageModel {
   final DateTime updatedAt;
 
   // Reply target: id of the quoted group message. Stored as an id only —
-  // never a quoted-text snapshot — so the server learns nothing about
-  // encrypted message content.
+  // never a quoted-text snapshot.
   final String? replyToId;
 
-  // E2EE: opaque sender-key ciphertext fields relayed verbatim by the server.
+  // Legacy read-only compatibility: rows written before plaintext mode may
+  // carry `encryption != 'none'` with cipher fields. New writes always use
+  // `encryption='none'` with NULL ciphers (see GroupService.sendGroupMessage).
+  // Surfaced in JSON only so old data can be identified as legacy history.
   final String encryption;
   final int? cipherType;
   final String? cipherBody;
@@ -101,9 +103,6 @@ class GroupMessageModel {
     DateTime? createdAt,
     DateTime? updatedAt,
     String? replyToId,
-    String? encryption,
-    int? cipherType,
-    String? cipherBody,
   }) {
     return GroupMessageModel(
       id: id ?? this.id,
@@ -119,9 +118,10 @@ class GroupMessageModel {
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
       replyToId: replyToId ?? this.replyToId,
-      encryption: encryption ?? this.encryption,
-      cipherType: cipherType ?? this.cipherType,
-      cipherBody: cipherBody ?? this.cipherBody,
+      // Legacy values preserved, never reassigned in plaintext mode.
+      encryption: encryption,
+      cipherType: cipherType,
+      cipherBody: cipherBody,
     );
   }
 }

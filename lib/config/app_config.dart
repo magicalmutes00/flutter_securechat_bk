@@ -71,11 +71,11 @@ class AppConfig {
       int.tryParse(EnvConfig.get('MAX_FILE_SIZE_BYTES') ?? '52428800') ??
       52428800;
   static Map<String, List<String>> get allowedFileExtensions => {
-        // 'enc' covers end-to-end encrypted attachments whose original
-        // extension was lost; their content is opaque ciphertext.
-        'image': ['jpg', 'jpeg', 'png', 'gif', 'webp', 'enc'],
-        'video': ['mp4', 'mov', 'avi', 'mkv', 'webm', 'enc'],
-        'audio': ['mp3', 'wav', 'aac', 'm4a', 'ogg', 'enc'],
+        // Plaintext attachments only: every category lists real media/document
+        // extensions. No `.enc` wrapper exists in plaintext mode.
+        'image': ['jpg', 'jpeg', 'png', 'gif', 'webp'],
+        'video': ['mp4', 'mov', 'avi', 'mkv', 'webm'],
+        'audio': ['mp3', 'wav', 'aac', 'm4a', 'ogg'],
         'document': [
           'pdf',
           'doc',
@@ -84,8 +84,7 @@ class AppConfig {
           'xls',
           'xlsx',
           'ppt',
-          'pptx',
-          'enc'
+          'pptx'
         ],
       };
 

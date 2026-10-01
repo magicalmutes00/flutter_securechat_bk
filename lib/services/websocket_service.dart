@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import '../models/message_model.dart';
+import '../utils/plaintext_guard.dart';
 import '../utils/validate.dart';
 import 'group_service.dart';
 import 'message_service.dart';
@@ -68,9 +69,9 @@ class WebSocketService {
         case 'read':
           _handleReadReceipt(data, readerUserId: authenticatedUserId);
           break;
-        case 'reset_session':
-          _handleResetSession(data, authenticatedUserId: authenticatedUserId);
-          break;
+        // NOTE: no session-reset case. Legacy crypto-control frames fall
+        // through to `default` and are silently ignored/dropped — they are
+        // never relayed.
         case 'delivered':
           _handleDeliveryReceipt(data, receiverUserId: authenticatedUserId);
           break;
@@ -107,6 +108,9 @@ class WebSocketService {
     if (authenticatedUserId == null) return;
 
     try {
+      // Plaintext-only: drop any frame carrying crypto/control material.
+      if (rejectCryptoMessagePayload(data) != null) return;
+
       final senderId = authenticatedUserId;
       final receiverId = data['receiver_id'] as String?;
       if (receiverId == null || !isValidUuid(receiverId)) return;
@@ -117,9 +121,6 @@ class WebSocketService {
       final fileSize = data['file_size'] as int?;
       final mediaType = data['media_type'] as String?;
       final replyToId = data['reply_to_id'] as String?;
-      final encryption = data['encryption'] as String? ?? 'none';
-      final cipherType = data['cipher_type'] as int?;
-      final cipherBody = data['cipher_body'] as String?;
 
       if (receiverId == senderId) {
         return;
@@ -135,9 +136,6 @@ class WebSocketService {
         fileSize: fileSize,
         mediaType: mediaType,
         replyToId: replyToId,
-        encryption: encryption,
-        cipherType: cipherType,
-        cipherBody: cipherBody,
       );
 
       final messageData = message.toJson();
@@ -170,9 +168,8 @@ class WebSocketService {
       final sender = await _userService.findUserById(senderId);
       final senderName = sender?.displayName ?? 'Someone';
 
-      final body = message.messageType == 'text'
-          ? 'Sent you a message'
-          : _messageTypeLabel(message.messageType);
+      // Plaintext mode: push bodies show the actual text content.
+      final body = plaintextPushBody(message.messageType, message.content);
 
       await _pushService.sendToUser(
         userId: receiverId,
@@ -204,6 +201,19 @@ class WebSocketService {
     }
   }
 
+  /// Push body for plaintext messages: actual text content for `text`
+  /// messages (truncated), generic media labels otherwise.
+  String plaintextPushBody(String messageType, String content) {
+    if (messageType == 'text') {
+      final trimmed = content.trim();
+      if (trimmed.isEmpty) return 'Sent you a message';
+      const maxLength = 120;
+      if (trimmed.length <= maxLength) return trimmed;
+      return '${trimmed.substring(0, maxLength)}…';
+    }
+    return _messageTypeLabel(messageType);
+  }
+
   Future<void> _handleGroupMessage(
     Map<String, dynamic> data, {
     required String? authenticatedUserId,
@@ -211,6 +221,9 @@ class WebSocketService {
     if (authenticatedUserId == null) return;
 
     try {
+      // Plaintext-only: drop any frame carrying crypto/control material.
+      if (rejectCryptoMessagePayload(data) != null) return;
+
       final senderId = authenticatedUserId;
       final groupId = data['group_id'] as String?;
       if (groupId == null || !isValidUuid(groupId)) return;
@@ -228,9 +241,6 @@ class WebSocketService {
         fileSize: data['file_size'] as int?,
         mediaType: data['media_type'] as String?,
         replyToId: data['reply_to_id'] as String?,
-        encryption: data['encryption'] as String? ?? 'none',
-        cipherType: data['cipher_type'] as int?,
-        cipherBody: data['cipher_body'] as String?,
       );
 
       final messageData = message.toJson();
@@ -247,14 +257,11 @@ class WebSocketService {
         'data': messageData,
       });
 
-      // Notify offline group members.
+      // Notify offline group members. Plaintext mode shows actual text.
       final sender = await _userService.findUserById(senderId);
       final senderName = sender?.displayName ?? 'Someone';
-      // Never include message content in push bodies — the FCM channel is
-      // not end-to-end encrypted.
-      final body = message.messageType == 'text'
-          ? 'Sent you a message'
-          : _messageTypeLabel(message.messageType);
+      final body =
+          plaintextPushBody(message.messageType, message.content);
       for (final memberId in group.memberIds) {
         if (memberId == senderId) continue;
         if (isUserConnected(memberId)) continue;
@@ -308,23 +315,6 @@ class WebSocketService {
       'type': 'typing',
       'sender_id': authenticatedUserId,
       'is_typing': data['is_typing'] ?? true,
-    });
-  }
-
-  /// Relays a "your messages don't decrypt on my side, drop your session
-  /// with me" request. Same trust shape as typing: the sender is the
-  /// authenticated connection owner, the payload carries no content, and a
-  /// malicious peer can at worst force an extra X3DH round trip.
-  void _handleResetSession(
-    Map<String, dynamic> data, {
-    required String? authenticatedUserId,
-  }) {
-    if (authenticatedUserId == null) return;
-    final receiverId = data['receiver_id'] as String?;
-    if (receiverId == null || !isValidUuid(receiverId)) return;
-    _sendToUser(receiverId, {
-      'type': 'reset_session',
-      'sender_id': authenticatedUserId,
     });
   }
 

@@ -9,10 +9,11 @@ import 'package:secure_chat_server/utils/file_validation.dart';
 
 void main() {
   group('validateUploadFile', () {
-    test('accepts opaque ciphertext under a real extension', () {
-      // Random bytes: lookupMimeType finds no magic, so ciphertext passes.
-      final cipher = List<int>.generate(256, (i) => (i * 37 + 11) % 256);
-      expect(validateUploadFile('photo.jpg', cipher, 'image'), isNull);
+    test('accepts unidentifiable bytes under a real extension', () {
+      // Random bytes: lookupMimeType finds no magic, so generic binary
+      // content passes the sniff when the extension is allow-listed.
+      final opaque = List<int>.generate(256, (i) => (i * 37 + 11) % 256);
+      expect(validateUploadFile('photo.jpg', opaque, 'image'), isNull);
     });
 
     test('accepts matching content and extension', () {
@@ -39,6 +40,13 @@ void main() {
       final result = validateUploadFile('run.exe', [1, 2, 3], 'image');
       expect(result, isNotNull);
       expect(result!.code, 'extension_not_allowed');
+    });
+
+    test('rejects legacy .enc wrappers in plaintext mode', () {
+      expect(validateUploadFile('photo.enc', [1, 2, 3], 'image'), isNotNull);
+      expect(validateUploadFile('clip.enc', [1, 2, 3], 'video'), isNotNull);
+      expect(validateUploadFile('note.enc', [1, 2, 3], 'document'), isNotNull);
+      expect(validateUploadFile('sound.enc', [1, 2, 3], 'audio'), isNotNull);
     });
 
     test('rejects unknown type categories', () {

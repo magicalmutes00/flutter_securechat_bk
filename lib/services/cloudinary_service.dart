@@ -47,8 +47,7 @@ class CloudinaryUploadResult {
 /// Uploads are signed with the API secret; downloads are only possible via
 /// short server-minted signed URLs, which the API issues after its own
 /// participant authorization check — there is no public URL for any file.
-/// End-to-end encrypted attachments are uploaded as opaque ciphertext; their
-/// AES keys travel inside the Signal-encrypted message, never to the server.
+/// Attachments are stored as plaintext media bytes in plaintext mode.
 class CloudinaryService {
   final Uuid _uuid = const Uuid();
 
@@ -58,11 +57,10 @@ class CloudinaryService {
 
   /// Uploads [bytes] as a private asset and returns where to find it.
   ///
-  /// Always uses the `raw` resource type: attachments are AES-GCM ciphertext
-  /// (the original extension is kept only for the server's allow-list), and
-  /// the `/auto` endpoint rejects them with "Invalid image file" after trying
-  /// to content-sniff random bytes as media. The client decrypts raw bytes
-  /// locally, so no Cloudinary transformation is ever needed.
+  /// Always uses the `raw` resource type: attachments are uploaded as raw
+  /// bytes (the original extension is kept only for the server's allow-list),
+  /// and the `/auto` endpoint rejects some payloads after content-sniffing
+  /// them as media. No Cloudinary transformation is ever needed.
   Future<CloudinaryUploadResult> upload({
     required List<int> bytes,
     required String filename,
@@ -117,7 +115,7 @@ class CloudinaryService {
   }
 
   /// Deletes the asset [publicId] of [resourceType] (`image`/`video` for
-  /// legacy media-sniffed uploads, `raw` for current opaque uploads).
+  /// legacy media-sniffed uploads, `raw` for current uploads).
   /// Signed with the API secret like uploads. Returns true when Cloudinary
   /// reports the asset deleted — or already absent, which is success for
   /// idempotent cleanup paths.

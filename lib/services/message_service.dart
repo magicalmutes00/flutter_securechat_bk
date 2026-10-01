@@ -6,6 +6,12 @@ import 'database_service.dart';
 class MessageService {
   final DatabaseService _db = DatabaseService();
 
+  /// Stores a new plaintext 1:1 message.
+  ///
+  /// There are intentionally no `encryption`/`cipher_*`/`distribution`/key
+  /// parameters: every new row is normalized to `encryption='none'` with NULL
+  /// cipher fields. Historical rows may still carry legacy encrypted values,
+  /// which [MessageModel.fromMap] preserves read-only for identification.
   Future<MessageModel> sendMessage({
     required String senderId,
     required String receiverId,
@@ -16,9 +22,6 @@ class MessageService {
     int? fileSize,
     String? mediaType,
     String? replyToId,
-    String encryption = 'none',
-    int? cipherType,
-    String? cipherBody,
   }) async {
     final resolvedReplyToId =
         await _resolveReplyTarget(replyToId, senderId, receiverId);
@@ -43,9 +46,10 @@ class MessageService {
         'media_type': mediaType,
         'status': AppConfig.messageStatusSent,
         'reply_to_id': resolvedReplyToId,
-        'encryption': encryption,
-        'cipher_type': cipherType,
-        'cipher_body': cipherBody,
+        // Plaintext normalization: historical columns kept for legacy rows.
+        'encryption': 'none',
+        'cipher_type': null,
+        'cipher_body': null,
       },
     );
     return MessageModel.fromMap(row!);

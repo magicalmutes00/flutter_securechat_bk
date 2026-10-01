@@ -5,8 +5,9 @@ import '../config/app_config.dart';
 
 /// Extension allow-list plus a content sniff: the first bytes must not
 /// contradict the claimed extension. Unidentifiable content
-/// (application/octet-stream) is allowed — that is what end-to-end
-/// encrypted attachments look like; their keys travel in the message.
+/// (application/octet-stream) is allowed for container formats the sniffer
+/// cannot fingerprint; plaintext media is validated by extension and, when
+/// recognizable, by magic bytes.
 ///
 /// Returns null when the file is acceptable, otherwise the user-facing
 /// message and the machine-readable `code` the mobile app maps to its own

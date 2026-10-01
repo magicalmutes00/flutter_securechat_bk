@@ -15,12 +15,14 @@ class MessageModel {
 
   // Reply target: id of the quoted message in the same conversation.
   // Nullable; null when the reply has no target or the target was deleted.
-  // Only the id is stored — never a quoted-text snapshot — so the server
-  // learns nothing about encrypted message content.
+  // Only the id is stored — never a quoted-text snapshot.
   final String? replyToId;
 
-  // E2EE: for encrypted messages the server relays these opaque fields and
-  // never reads/parses the ciphertext. `content` stays empty.
+  // Legacy read-only compatibility: rows written before plaintext mode may
+  // carry `encryption != 'none'` with cipher fields. New writes always use
+  // `encryption='none'` with NULL ciphers (see MessageService.sendMessage).
+  // These fields are surfaced in JSON only so old clients/data can be
+  // identified as legacy encrypted history; no new encrypted behavior exists.
   final String encryption;
   final int? cipherType;
   final String? cipherBody;
@@ -100,9 +102,6 @@ class MessageModel {
     DateTime? createdAt,
     DateTime? updatedAt,
     String? replyToId,
-    String? encryption,
-    int? cipherType,
-    String? cipherBody,
   }) {
     return MessageModel(
       id: id ?? this.id,
@@ -118,9 +117,11 @@ class MessageModel {
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
       replyToId: replyToId ?? this.replyToId,
-      encryption: encryption ?? this.encryption,
-      cipherType: cipherType ?? this.cipherType,
-      cipherBody: cipherBody ?? this.cipherBody,
+      // Legacy encryption/cipher values are preserved, never reassigned:
+      // plaintext mode has no path that creates new encrypted content.
+      encryption: encryption,
+      cipherType: cipherType,
+      cipherBody: cipherBody,
     );
   }
 }

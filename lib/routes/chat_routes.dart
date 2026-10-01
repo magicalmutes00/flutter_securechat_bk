@@ -7,6 +7,7 @@ import '../services/file_service.dart';
 import '../services/message_service.dart';
 import '../services/user_service.dart';
 import '../utils/api_responses.dart';
+import '../utils/plaintext_guard.dart';
 import '../utils/validate.dart';
 import '../config/app_config.dart';
 
@@ -162,9 +163,17 @@ class ChatRoutes {
       final fileSize = data['file_size'] as int?;
       final mediaType = data['media_type'] as String?;
       final replyToId = data['reply_to_id'] as String?;
-      final encryption = data['encryption'] as String? ?? 'none';
-      final cipherType = data['cipher_type'] as int?;
-      final cipherBody = data['cipher_body'] as String?;
+
+      // Plaintext-only contract: reject any crypto/control material before
+      // touching the database. Absent `encryption` defaults to 'none'.
+      final cryptoRejection = rejectCryptoMessagePayload(data);
+      if (cryptoRejection != null) {
+        return Response(
+          400,
+          body: jsonEncode({'error': cryptoRejection}),
+          headers: {'Content-Type': 'application/json'},
+        );
+      }
 
       if (receiverId == null || !isValidUuid(receiverId)) {
         return Response(
@@ -184,9 +193,6 @@ class ChatRoutes {
         fileSize: fileSize,
         mediaType: mediaType,
         replyToId: replyToId,
-        encryption: encryption,
-        cipherType: cipherType,
-        cipherBody: cipherBody,
       );
 
       return Response.ok(

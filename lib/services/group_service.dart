@@ -95,6 +95,11 @@ class GroupService {
   // Group messages
   // ---------------------------------------------------------------------------
 
+  /// Stores a new plaintext group message.
+  ///
+  /// No `encryption`/`cipher_*`/`distribution`/key parameters exist: every
+  /// new row is normalized to `encryption='none'` with NULL cipher fields.
+  /// Historical rows may retain legacy encrypted values for identification.
   Future<GroupMessageModel> sendGroupMessage({
     required String groupId,
     required String senderId,
@@ -105,9 +110,6 @@ class GroupService {
     int? fileSize,
     String? mediaType,
     String? replyToId,
-    String encryption = 'none',
-    int? cipherType,
-    String? cipherBody,
   }) async {
     final resolvedReplyToId = await _resolveReplyTarget(replyToId, groupId);
     final row = await _db.queryOne(
@@ -131,9 +133,10 @@ class GroupService {
         'media_type': mediaType,
         'status': AppConfig.messageStatusSent,
         'reply_to_id': resolvedReplyToId,
-        'encryption': encryption,
-        'cipher_type': cipherType,
-        'cipher_body': cipherBody,
+        // Plaintext normalization: historical columns kept for legacy rows.
+        'encryption': 'none',
+        'cipher_type': null,
+        'cipher_body': null,
       },
     );
     return GroupMessageModel.fromMap(row!);

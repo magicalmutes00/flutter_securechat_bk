@@ -48,7 +48,8 @@ class DatabaseService {
     return rows.isEmpty ? null : rows.first;
   }
 
-  Future<int> executeCount(String sql, {Map<String, Object?>? parameters}) async {
+  Future<int> executeCount(String sql,
+      {Map<String, Object?>? parameters}) async {
     final result = await execute(sql, parameters: parameters);
     return result.affectedRows;
   }
@@ -129,7 +130,8 @@ class DatabaseService {
         updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
       )
     ''');
-    await execute('CREATE INDEX IF NOT EXISTS idx_users_username ON users (username)');
+    await execute(
+        'CREATE INDEX IF NOT EXISTS idx_users_username ON users (username)');
     // Rotation grace: the previously-current refresh jti stays acceptable for
     // a few minutes so a client killed mid-rotation (new pair issued, old
     // pair still stored) can retry with the old token instead of being
@@ -153,8 +155,13 @@ class DatabaseService {
         created_at TIMESTAMPTZ NOT NULL DEFAULT now()
       )
     ''');
-    await execute('CREATE INDEX IF NOT EXISTS idx_otp_phone ON otp_codes (phone, purpose)');
+    await execute(
+        'CREATE INDEX IF NOT EXISTS idx_otp_phone ON otp_codes (phone, purpose)');
 
+    // Plaintext 1:1 messages. `encryption`/`cipher_type`/`cipher_body` are
+    // retained ONLY so historical rows written before plaintext mode can be
+    // identified as legacy encrypted history. All new rows use
+    // encryption='none' with NULL cipher fields.
     await execute('''
       CREATE TABLE IF NOT EXISTS messages (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -188,7 +195,8 @@ class DatabaseService {
         'CREATE INDEX IF NOT EXISTS idx_messages_receiver ON messages (receiver_id, created_at DESC)');
     await execute(
         'CREATE INDEX IF NOT EXISTS idx_messages_pair ON messages (sender_id, receiver_id, created_at DESC)');
-    await execute('CREATE INDEX IF NOT EXISTS idx_messages_file ON messages (file_path)');
+    await execute(
+        'CREATE INDEX IF NOT EXISTS idx_messages_file ON messages (file_path)');
 
     // Metadata for Cloudinary-stored attachments. Bytes live in Cloudinary
     // (uploaded as `type=authenticated`); delivery uses short-lived signed
@@ -207,21 +215,13 @@ class DatabaseService {
       )
     ''');
 
-    await execute('''
-      CREATE TABLE IF NOT EXISTS keys (
-        user_id UUID NOT NULL,
-        device_id TEXT NOT NULL,
-        registration_id INT NOT NULL DEFAULT 0,
-        identity_key_public TEXT NOT NULL,
-        signed_prekey_id INT NOT NULL DEFAULT 0,
-        signed_prekey_public TEXT NOT NULL,
-        signed_prekey_signature TEXT NOT NULL,
-        one_time_prekeys JSONB NOT NULL DEFAULT '[]'::jsonb,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-        PRIMARY KEY (user_id, device_id)
-      )
-    ''');
+    // Plaintext mode has no key-bundle endpoints or services. Remove any
+    // obsolete `keys` table left by an older deployment; it holds only public
+    // key-exchange material and is never read or written anymore.
+    // `messages`/`group_messages` keep their historical `encryption`/`cipher_*`
+    // columns below for legacy-row identification only — all new rows are
+    // written as encryption='none' with NULL ciphers.
+    await execute('DROP TABLE IF EXISTS keys');
 
     await execute('''
       CREATE TABLE IF NOT EXISTS groups (
@@ -235,6 +235,8 @@ class DatabaseService {
       )
     ''');
 
+    // Plaintext group messages. `encryption`/`cipher_*` retained ONLY for
+    // legacy-row identification; new rows are always 'none'/NULL.
     await execute('''
       CREATE TABLE IF NOT EXISTS group_messages (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -276,8 +278,10 @@ class DatabaseService {
         expires_at TIMESTAMPTZ NOT NULL
       )
     ''');
-    await execute('CREATE INDEX IF NOT EXISTS idx_statuses_expiry ON statuses (expires_at)');
-    await execute('CREATE INDEX IF NOT EXISTS idx_statuses_user ON statuses (user_id)');
+    await execute(
+        'CREATE INDEX IF NOT EXISTS idx_statuses_expiry ON statuses (expires_at)');
+    await execute(
+        'CREATE INDEX IF NOT EXISTS idx_statuses_user ON statuses (user_id)');
 
     await execute('''
       CREATE TABLE IF NOT EXISTS push_tokens (
@@ -287,7 +291,8 @@ class DatabaseService {
         updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
       )
     ''');
-    await execute('CREATE INDEX IF NOT EXISTS idx_push_tokens_user ON push_tokens (user_id)');
+    await execute(
+        'CREATE INDEX IF NOT EXISTS idx_push_tokens_user ON push_tokens (user_id)');
   }
 
   Future<void> close() async {

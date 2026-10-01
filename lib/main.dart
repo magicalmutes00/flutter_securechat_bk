@@ -16,7 +16,6 @@ import 'routes/auth_routes.dart';
 import 'routes/chat_routes.dart';
 import 'routes/file_routes.dart';
 import 'routes/group_routes.dart';
-import 'routes/key_routes.dart';
 import 'routes/push_routes.dart';
 import 'routes/rtc_routes.dart';
 import 'routes/status_routes.dart';
@@ -123,7 +122,6 @@ Handler _router(WebSocketService websocketService) {
   final authRoutes = AuthRoutes();
   final chatRoutes = ChatRoutes();
   final fileRoutes = FileRoutes();
-  final keyRoutes = KeyRoutes();
   final groupRoutes = GroupRoutes();
   final statusRoutes = StatusRoutes();
   final pushRoutes = PushRoutes();
@@ -137,11 +135,6 @@ Handler _router(WebSocketService websocketService) {
   final protectedFileHandler = const Pipeline()
       .addMiddleware(addAuthMiddleware)
       .addHandler(fileRoutes.router);
-
-  // E2EE key bundles require authentication.
-  final protectedKeyHandler = const Pipeline()
-      .addMiddleware(addAuthMiddleware)
-      .addHandler(keyRoutes.router);
 
   // Group management requires authentication.
   final protectedGroupHandler = const Pipeline()
@@ -251,7 +244,6 @@ Handler _router(WebSocketService websocketService) {
     // Chat and file routes require a valid Bearer token
     ..mount('/api/chat/', protectedChatHandler)
     ..mount('/api/files/', protectedFileHandler)
-    ..mount('/api/keys/', protectedKeyHandler)
     ..mount('/api/groups/', protectedGroupHandler)
     ..mount('/api/status/', protectedStatusHandler)
     ..mount('/api/push/', protectedPushHandler)
