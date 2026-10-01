@@ -157,6 +157,7 @@ class ChatRoutes {
       final fileName = data['file_name'] as String?;
       final fileSize = data['file_size'] as int?;
       final mediaType = data['media_type'] as String?;
+      final replyToId = data['reply_to_id'] as String?;
       final encryption = data['encryption'] as String? ?? 'none';
       final cipherType = data['cipher_type'] as int?;
       final cipherBody = data['cipher_body'] as String?;
@@ -178,6 +179,7 @@ class ChatRoutes {
         fileName: fileName,
         fileSize: fileSize,
         mediaType: mediaType,
+        replyToId: replyToId,
         encryption: encryption,
         cipherType: cipherType,
         cipherBody: cipherBody,

@@ -166,8 +166,16 @@ class DatabaseService {
         updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
       )
     ''');
+    // Replies: nullable self-reference. An ALTER (not CREATE TABLE) because
+    // deployed databases already have the table; idempotent on every boot.
+    // ON DELETE SET NULL keeps replies renderable when the quoted message is
+    // deleted.
+    await execute(
+        'ALTER TABLE messages ADD COLUMN IF NOT EXISTS reply_to_id UUID REFERENCES messages(id) ON DELETE SET NULL');
     await execute(
         'CREATE INDEX IF NOT EXISTS idx_messages_sender ON messages (sender_id, created_at DESC)');
+    await execute(
+        'CREATE INDEX IF NOT EXISTS idx_messages_reply_to ON messages (reply_to_id)');
     await execute(
         'CREATE INDEX IF NOT EXISTS idx_messages_receiver ON messages (receiver_id, created_at DESC)');
     await execute(
@@ -238,8 +246,13 @@ class DatabaseService {
         updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
       )
     ''');
+    // Same reply-link pattern as `messages`, keyed to the parent group table.
+    await execute(
+        'ALTER TABLE group_messages ADD COLUMN IF NOT EXISTS reply_to_id UUID REFERENCES group_messages(id) ON DELETE SET NULL');
     await execute(
         'CREATE INDEX IF NOT EXISTS idx_group_messages_group ON group_messages (group_id, created_at DESC)');
+    await execute(
+        'CREATE INDEX IF NOT EXISTS idx_group_messages_reply_to ON group_messages (reply_to_id)');
     await execute(
         'CREATE INDEX IF NOT EXISTS idx_group_messages_file ON group_messages (file_path)');
 

@@ -1,6 +1,7 @@
 import '../config/app_config.dart';
 import '../models/group_message_model.dart';
 import '../models/group_model.dart';
+import '../utils/validate.dart';
 import 'database_service.dart';
 
 class GroupService {
@@ -103,18 +104,20 @@ class GroupService {
     String? fileName,
     int? fileSize,
     String? mediaType,
+    String? replyToId,
     String encryption = 'none',
     int? cipherType,
     String? cipherBody,
   }) async {
+    final resolvedReplyToId = await _resolveReplyTarget(replyToId, groupId);
     final row = await _db.queryOne(
       '''
       INSERT INTO group_messages
         (group_id, sender_id, message_type, content, file_path, file_name,
-         file_size, media_type, status, encryption, cipher_type, cipher_body)
+         file_size, media_type, status, reply_to_id, encryption, cipher_type, cipher_body)
       VALUES
         (@group_id:uuid, @sender_id:uuid, @message_type, @content, @file_path,
-         @file_name, @file_size, @media_type, @status, @encryption, @cipher_type, @cipher_body)
+         @file_name, @file_size, @media_type, @status, @reply_to_id, @encryption, @cipher_type, @cipher_body)
       RETURNING *
       ''',
       parameters: {
@@ -127,12 +130,34 @@ class GroupService {
         'file_size': fileSize,
         'media_type': mediaType,
         'status': AppConfig.messageStatusSent,
+        'reply_to_id': resolvedReplyToId,
         'encryption': encryption,
         'cipher_type': cipherType,
         'cipher_body': cipherBody,
       },
     );
     return GroupMessageModel.fromMap(row!);
+  }
+
+  Future<GroupMessageModel?> getGroupMessageById(String id) async {
+    final row = await _db.queryOne(
+      'SELECT * FROM group_messages WHERE id = @id:uuid',
+      parameters: {'id': id},
+    );
+    if (row == null) return null;
+    return GroupMessageModel.fromMap(row);
+  }
+
+  /// Resolves a client-supplied `reply_to_id` to a persisted link, or null.
+  ///
+  /// The target must exist and belong to the same group; anything else is
+  /// refused by dropping the link rather than failing the send.
+  Future<String?> _resolveReplyTarget(String? replyToId, String groupId) async {
+    if (replyToId == null || replyToId.isEmpty) return null;
+    if (!isValidUuid(replyToId)) return null;
+    final target = await getGroupMessageById(replyToId);
+    if (target == null || target.groupId != groupId) return null;
+    return replyToId;
   }
 
   Future<List<GroupMessageModel>> getGroupMessages({

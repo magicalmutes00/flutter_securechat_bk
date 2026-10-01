@@ -13,6 +13,12 @@ class MessageModel {
   final DateTime createdAt;
   final DateTime updatedAt;
 
+  // Reply target: id of the quoted message in the same conversation.
+  // Nullable; null when the reply has no target or the target was deleted.
+  // Only the id is stored — never a quoted-text snapshot — so the server
+  // learns nothing about encrypted message content.
+  final String? replyToId;
+
   // E2EE: for encrypted messages the server relays these opaque fields and
   // never reads/parses the ciphertext. `content` stays empty.
   final String encryption;
@@ -32,6 +38,7 @@ class MessageModel {
     required this.status,
     required this.createdAt,
     required this.updatedAt,
+    this.replyToId,
     this.encryption = 'none',
     this.cipherType,
     this.cipherBody,
@@ -51,6 +58,7 @@ class MessageModel {
       status: map['status'] as String,
       createdAt: (map['created_at'] as DateTime).toUtc(),
       updatedAt: (map['updated_at'] as DateTime).toUtc(),
+      replyToId: map['reply_to_id'] as String?,
       encryption: map['encryption'] as String? ?? 'none',
       cipherType: (map['cipher_type'] as num?)?.toInt(),
       cipherBody: map['cipher_body'] as String?,
@@ -71,6 +79,7 @@ class MessageModel {
       'status': status,
       'created_at': createdAt.toIso8601String(),
       'updated_at': updatedAt.toIso8601String(),
+      'reply_to_id': replyToId,
       'encryption': encryption,
       'cipher_type': cipherType,
       'cipher_body': cipherBody,
@@ -90,6 +99,7 @@ class MessageModel {
     String? status,
     DateTime? createdAt,
     DateTime? updatedAt,
+    String? replyToId,
     String? encryption,
     int? cipherType,
     String? cipherBody,
@@ -107,6 +117,7 @@ class MessageModel {
       status: status ?? this.status,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
+      replyToId: replyToId ?? this.replyToId,
       encryption: encryption ?? this.encryption,
       cipherType: cipherType ?? this.cipherType,
       cipherBody: cipherBody ?? this.cipherBody,

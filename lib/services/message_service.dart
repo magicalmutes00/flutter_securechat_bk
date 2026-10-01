@@ -1,5 +1,6 @@
 import '../config/app_config.dart';
 import '../models/message_model.dart';
+import '../utils/validate.dart';
 import 'database_service.dart';
 
 class MessageService {
@@ -14,18 +15,21 @@ class MessageService {
     String? fileName,
     int? fileSize,
     String? mediaType,
+    String? replyToId,
     String encryption = 'none',
     int? cipherType,
     String? cipherBody,
   }) async {
+    final resolvedReplyToId =
+        await _resolveReplyTarget(replyToId, senderId, receiverId);
     final row = await _db.queryOne(
       '''
       INSERT INTO messages
         (sender_id, receiver_id, message_type, content, file_path, file_name,
-         file_size, media_type, status, encryption, cipher_type, cipher_body)
+         file_size, media_type, status, reply_to_id, encryption, cipher_type, cipher_body)
       VALUES
         (@sender_id:uuid, @receiver_id:uuid, @message_type, @content, @file_path,
-         @file_name, @file_size, @media_type, @status, @encryption, @cipher_type, @cipher_body)
+         @file_name, @file_size, @media_type, @status, @reply_to_id, @encryption, @cipher_type, @cipher_body)
       RETURNING *
       ''',
       parameters: {
@@ -38,12 +42,33 @@ class MessageService {
         'file_size': fileSize,
         'media_type': mediaType,
         'status': AppConfig.messageStatusSent,
+        'reply_to_id': resolvedReplyToId,
         'encryption': encryption,
         'cipher_type': cipherType,
         'cipher_body': cipherBody,
       },
     );
     return MessageModel.fromMap(row!);
+  }
+
+  /// Resolves a client-supplied `reply_to_id` to a persisted link, or null.
+  ///
+  /// The target must exist and belong to the same 1:1 conversation; anything
+  /// else (malformed id, deleted message, id from an unrelated chat) is
+  /// refused by dropping the link rather than failing the send.
+  Future<String?> _resolveReplyTarget(
+    String? replyToId,
+    String senderId,
+    String receiverId,
+  ) async {
+    if (replyToId == null || replyToId.isEmpty) return null;
+    if (!isValidUuid(replyToId)) return null;
+    final target = await getMessageById(replyToId);
+    if (target == null) return null;
+    final sameConversation =
+        (target.senderId == senderId && target.receiverId == receiverId) ||
+            (target.senderId == receiverId && target.receiverId == senderId);
+    return sameConversation ? replyToId : null;
   }
 
   Future<List<MessageModel>> getMessages({
