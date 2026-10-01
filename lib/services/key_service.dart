@@ -105,6 +105,11 @@ class KeyService {
         WHERE user_id = @user_id:uuid
           AND (@device_id = '' OR device_id = @device_id)
           AND jsonb_array_length(one_time_prekeys) > 0
+        -- Reinstalls leave stale device rows behind; the live device keeps
+        -- touching its row (uploads, replenishes, prekey pops bump
+        -- updated_at), so the freshest row is the reachable one.
+        ORDER BY updated_at DESC
+        LIMIT 1
         FOR UPDATE
       ),
       updated AS (
@@ -124,9 +129,10 @@ class KeyService {
       return _bundleResponse(row);
     }
 
-    // No consumable prekey — return the bundle itself.
+    // No consumable prekey — return the bundle itself (freshest row first,
+    // same reinstall reasoning as above).
     final bundleRow = await _db.queryOne(
-      'SELECT * FROM keys WHERE user_id = @user_id:uuid AND (@device_id = \'\' OR device_id = @device_id)',
+      'SELECT * FROM keys WHERE user_id = @user_id:uuid AND (@device_id = \'\' OR device_id = @device_id) ORDER BY updated_at DESC LIMIT 1',
       parameters: {'user_id': userId, 'device_id': deviceId ?? ''},
     );
     if (bundleRow == null) return null;
