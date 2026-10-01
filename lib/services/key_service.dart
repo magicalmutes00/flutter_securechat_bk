@@ -105,16 +105,24 @@ class KeyService {
         WHERE user_id = @user_id:uuid
           AND (@device_id = '' OR device_id = @device_id)
           AND jsonb_array_length(one_time_prekeys) > 0
-        -- Reinstalls leave stale device rows behind; the live device keeps
-        -- touching its row (uploads, replenishes, prekey pops bump
-        -- updated_at), so the freshest row is the reachable one.
-        ORDER BY updated_at DESC
+        -- Reinstalls leave stale device rows behind. Order by device-row
+        -- CREATION (install order, immutable): the newest install is the
+        -- reachable one. updated_at is deliberately NOT used — prekey pops
+        -- used to bump it, so a dead row looked perpetually fresh precisely
+        -- because it kept being served, and senders encrypted to keys nobody
+        -- holds (permanent "unable to decrypt" both ways).
+        ORDER BY created_at DESC
         LIMIT 1
         FOR UPDATE
       ),
       updated AS (
+        -- NOTE: deliberately no `updated_at = now()` here. updated_at is
+        -- the owner-activity signal consumed by the freshest-row ordering:
+        -- uploads and replenishes bump it, prekey pops must not. Otherwise
+        -- a dead install's row looks perpetually fresh precisely because it
+        -- keeps being served, and senders encrypt to keys nobody holds.
         UPDATE keys k
-        SET one_time_prekeys = k.one_time_prekeys - 0, updated_at = now()
+        SET one_time_prekeys = k.one_time_prekeys - 0
         FROM target t
         WHERE k.user_id = t.user_id AND k.device_id = t.device_id
         RETURNING k.*
@@ -129,10 +137,10 @@ class KeyService {
       return _bundleResponse(row);
     }
 
-    // No consumable prekey — return the bundle itself (freshest row first,
-    // same reinstall reasoning as above).
+    // No consumable prekey — return the bundle itself (newest install
+    // first, same reinstall reasoning as above).
     final bundleRow = await _db.queryOne(
-      'SELECT * FROM keys WHERE user_id = @user_id:uuid AND (@device_id = \'\' OR device_id = @device_id) ORDER BY updated_at DESC LIMIT 1',
+      'SELECT * FROM keys WHERE user_id = @user_id:uuid AND (@device_id = \'\' OR device_id = @device_id) ORDER BY created_at DESC LIMIT 1',
       parameters: {'user_id': userId, 'device_id': deviceId ?? ''},
     );
     if (bundleRow == null) return null;
