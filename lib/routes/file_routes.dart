@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:mime/mime.dart';
 import 'package:path/path.dart' as p;
 import 'package:shelf/shelf.dart';
@@ -14,6 +15,7 @@ import '../services/message_service.dart';
 import '../services/status_service.dart';
 import '../utils/api_responses.dart';
 import '../utils/file_validation.dart';
+import '../utils/multipart.dart';
 import '../utils/validate.dart';
 
 class FileRoutes {
@@ -96,9 +98,23 @@ class FileRoutes {
         );
       }
 
-      final bytes = await request.read().expand((chunk) => chunk).toList();
+      // Stream the body with a running cap: an oversized upload dies here,
+      // mid-stream, instead of after buffering the whole body in RAM (the
+      // old path transiently held ~4-5x the file size across the buffer,
+      // the decoded string, and the re-encoded slice).
+      late final Uint8List body;
+      try {
+        body = await readCappedBody(request, maxFileSizeBytes + 65536);
+      } on BodyTooLargeException {
+        return clientError(
+          413,
+          message: 'File size exceeds maximum allowed size',
+          code: 'file_too_large',
+          requestId: requestId,
+        );
+      }
 
-      final part = _extractMultipartFile(bytes, boundary);
+      final part = extractMultipartFile(body, boundary);
       if (part == null || part.bytes.isEmpty) {
         return clientError(
           400,
@@ -345,87 +361,12 @@ class FileRoutes {
     return row?['referenced'] as bool? ?? false;
   }
 
-  /// Extracts the first file part (a part carrying a filename) from a
-  /// multipart/form-data body. Delimiters and headers are located on a
-  /// latin-1 decoded view — a lossless byte↔codepoint mapping — so binary
-  /// payloads are sliced out intact.
-  static _MultipartFilePart? _extractMultipartFile(
-    List<int> body,
-    String boundary,
-  ) {
-    final text = latin1.decode(body);
-    final delimiter = '\r\n--$boundary';
-
-    // The first boundary usually sits at the very start of the body with no
-    // preamble CRLF before it (curl, dio and most clients send it that way).
-    final preamble = '--$boundary';
-    var cursor;
-    if (text.startsWith(preamble)) {
-      cursor = preamble.length;
-    } else {
-      cursor = text.indexOf(delimiter);
-      if (cursor == -1) return null;
-      cursor += delimiter.length;
-    }
-
-    while (true) {
-      if (text.startsWith('--', cursor)) return null; // closing boundary
-      if (text.startsWith('\r\n', cursor)) cursor += 2;
-
-      final headerEnd = text.indexOf('\r\n\r\n', cursor);
-      if (headerEnd == -1) return null;
-
-      final headerBlock = text.substring(cursor, headerEnd);
-      final disposition = headerBlock
-          .split('\r\n')
-          .firstWhere(
-            (line) =>
-                line.toLowerCase().startsWith('content-disposition:'),
-            orElse: () => '',
-          );
-      final filename = disposition.isEmpty
-          ? null
-          : _headerParam(disposition, 'filename');
-      final contentStart = headerEnd + 4;
-
-      final nextDelimiter = text.indexOf(delimiter, contentStart);
-      if (nextDelimiter == -1) return null; // truncated body
-
-      if (filename != null && filename.isNotEmpty) {
-        return _MultipartFilePart(
-          filename: filename,
-          bytes: latin1.encode(text.substring(contentStart, nextDelimiter)),
-        );
-      }
-
-      cursor = nextDelimiter + delimiter.length;
-    }
-  }
-
-  /// Reads `param="value"` (quoted) or `param=value` (unquoted) from a
-  /// Content-Disposition header line.
-  static String? _headerParam(String header, String param) {
-    final quoted =
-        RegExp('$param="([^"]*)"', caseSensitive: false).firstMatch(header);
-    if (quoted != null) return quoted.group(1);
-    final unquoted = RegExp('$param=([^;\r\n]+)', caseSensitive: false)
-        .firstMatch(header);
-    return unquoted?.group(1)?.trim();
-  }
-
   static String? _boundaryFromContentType(String contentType) {
     final match = RegExp(
       r'boundary=(?:"([^"]+)"|([^;,\s]+))',
       caseSensitive: false,
     ).firstMatch(contentType);
     if (match == null) return null;
-    return match.group(1) ?? match.group(2);
+      return match.group(1) ?? match.group(2);
   }
-}
-
-class _MultipartFilePart {
-  final String filename;
-  final List<int> bytes;
-
-  _MultipartFilePart({required this.filename, required this.bytes});
 }

@@ -128,10 +128,11 @@ class CloudinaryService {
     final timestamp =
         (DateTime.now().millisecondsSinceEpoch ~/ 1000).toString();
 
-    // Destroy signs every parameter except api_key. Sorted alphabetically:
-    // public_id, resource_type, timestamp, type.
-    final toSign = 'public_id=$publicId&resource_type=$resourceType'
-        '&timestamp=$timestamp&type=authenticated$_apiSecret';
+    // Like uploads, destroy signs every parameter except api_key — and the
+    // resource type travels in the endpoint path, not the signature.
+    // Sorted alphabetically: public_id, timestamp, type.
+    final toSign =
+        'public_id=$publicId&timestamp=$timestamp&type=authenticated$_apiSecret';
     final signature = crypto.sha1.convert(utf8.encode(toSign)).toString();
 
     final response = await http
@@ -140,7 +141,6 @@ class CloudinaryService {
               'https://api.cloudinary.com/v1_1/$_cloudName/$resourceType/destroy'),
           body: {
             'public_id': publicId,
-            'resource_type': resourceType,
             'timestamp': timestamp,
             'type': 'authenticated',
             'api_key': _apiKey,
