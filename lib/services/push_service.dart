@@ -107,6 +107,9 @@ class PushService {
         'click_action': 'FLUTTER_NOTIFICATION_CLICK',
         ...?data,
       },
+      // Wakes iOS in the background so the Dart background handler runs;
+      // ignored on Android.
+      'content_available': true,
       'priority': 'high',
     };
 
